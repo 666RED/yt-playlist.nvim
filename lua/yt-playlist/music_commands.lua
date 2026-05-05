@@ -4,9 +4,9 @@ local MusicCommand = {
 	PrevSong = "PrevSong",
 	SkipForward = "SkipForward",
 	SkipBack = "SkipBack",
-	Shuffle = "Shuffle",
 	Download = "Download",
 	Delete = "Delete",
+	SwitchMode = "SwitchMode",
 }
 
 return MusicCommand

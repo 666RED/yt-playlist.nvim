@@ -3,73 +3,104 @@ local M = {}
 ---@type MusicModule
 local music = require("yt-playlist.music")
 
-function M.setup()
-	local music_command = require("yt-playlist.music_commands")
+---@type StateModule
+local state = require("yt-playlist.state")
 
-	vim.api.nvim_create_user_command(music_command.PlayPause, function()
-		vim.print("play pause")
+---@type UiModule
+local ui = require("yt-playlist.ui")
+
+---@type DataModule
+local local_state = require("yt-playlist.data")
+
+local music_commands = require("yt-playlist.music_commands")
+
+function M.setup()
+	vim.api.nvim_create_user_command(music_commands.PlayPause, function()
+		music.pause_or_resume(function(data)
+			state.update_player_state({ paused = data.paused })
+			vim.schedule(function()
+				ui.update_ui()
+			end)
+		end)
 	end, { desc = "Play or pause the music" })
 
-	vim.api.nvim_create_user_command(music_command.NextSong, function()
-		vim.print("next song")
-	end, { desc = "Play next song" })
-
-	vim.api.nvim_create_user_command(music_command.PrevSong, function()
-		vim.print("previous song")
-	end, { desc = "Play previous song" })
-
-	vim.api.nvim_create_user_command(music_command.SkipForward, function()
-		vim.print("skip forward 10 seconds")
-	end, { desc = "Skip forward 10 seconds" })
-
-	vim.api.nvim_create_user_command(music_command.SkipBack, function()
-		vim.print("skip back 10 seconds")
-	end, { desc = "Skip back 10 seconds" })
-
-	vim.api.nvim_create_user_command(music_command.Shuffle, function()
-		vim.print("shuffle the play list")
-	end, { desc = "Shuffle play list" })
-
-	vim.api.nvim_create_user_command(music_command.Download, function()
-		music.download_song()
-	end, { desc = "Download youtube music" })
-
-	vim.api.nvim_create_user_command(music_command.Delete, function(attr)
-		music.delete_song(attr.args, function() end)
-	end, { desc = "Delete music", nargs = "?" }) -- 0 / 1 argument
-
 	return {
-		-- todo: here
 		PlayPause = function()
-			-- music.play_pause()
+			music.pause_or_resume(function(data)
+				state.update_player_state({ paused = data.paused })
+				vim.schedule(function()
+					ui.update_ui()
+				end)
+			end)
 		end,
 		NextSong = function()
-			music.next_song()
+			music.next_song(function(data)
+				state.update_player_state(vim.tbl_extend("force", data, { paused = false }))
+				vim.schedule(function()
+					ui.update_ui()
+				end)
+			end)
 		end,
 		PrevSong = function()
-			music.prev_song()
+			music.prev_song(function(data)
+				state.update_player_state(vim.tbl_extend("force", data, { paused = false }))
+				vim.schedule(function()
+					ui.update_ui()
+				end)
+			end)
 		end,
 		SkipForward = function()
-			-- music.skip_forward()
+			music.forward(function(data)
+				state.update_player_state(data)
+				vim.schedule(function()
+					ui.update_ui()
+				end)
+			end)
 		end,
 		SkipBack = function()
-			-- music.skip_back()
+			music.rewind(function(data)
+				state.update_player_state(data)
+				vim.schedule(function()
+					ui.update_ui()
+				end)
+			end)
 		end,
-		Shuffle = function()
-			-- music.shuffle()
-		end,
-		Delete = function(line, cb)
-			music.delete_song(line, cb)
+		Delete = function(line)
+			music.delete_song(line)
 		end,
 		Download = function()
 			music.download_song()
 		end,
-	}
+		SwitchMode = function()
+			music.switch_mode(function(mode)
+				vim.schedule(function()
+					local_state.save_mode(mode)
+				end)
 
-	-- todo: may add here
-	-- vim.api.nvim_create_user_command(music_command.Quit, function()
-	-- 	vim.print("quit music player")
-	-- end, { desc = "Quit music player" })
+				state.update_player_state({ mode = mode })
+
+				vim.schedule(function()
+					ui.update_info_buf()
+				end)
+			end)
+		end,
+		IncreaseVolume = function()
+			music.increase_volume(function(volume)
+				state.update_player_state(volume)
+				vim.schedule(function()
+					ui.update_info_buf()
+				end)
+			end)
+		end,
+		DecreaseVolume = function()
+			music.decrease_volume(function(volume)
+				state.update_player_state(volume)
+				vim.schedule(function()
+					ui.update_info_buf()
+				end)
+			end)
+		end,
+	}
 end
 
 return M

@@ -10,9 +10,17 @@ function M.setup(buf)
 		h = actions.SkipBack,
 		l = actions.SkipForward,
 		d = actions.Download,
-		s = actions.Shuffle,
 		x = actions.Delete,
+		m = actions.SwitchMode,
 	}
+
+	vim.api.nvim_buf_set_keymap(buf, "n", "-", "", {
+		callback = actions.DecreaseVolume,
+	})
+
+	vim.api.nvim_buf_set_keymap(buf, "n", "=", "", {
+		callback = actions.IncreaseVolume,
+	})
 
 	for key, fn in pairs(mappings) do
 		vim.api.nvim_buf_set_keymap(buf, "n", "<M-" .. key .. ">", "", {

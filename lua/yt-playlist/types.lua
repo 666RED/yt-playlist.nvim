@@ -1,13 +1,8 @@
----@class Song_Info
----@field title string|nil
----@field position integer|nil
----@field duration integer|nil
----@field paused boolean|nil
-
 ---@class Song_File
 ---@field full_name string
 ---@field filename string
 ---@field extension string
+---@field mpv_id integer | nil
 
 ---@class Song_File_With_Index: Song_File
 ---@field index integer
@@ -29,9 +24,14 @@
 ---@class YtPlaylistTimer
 ---@field position_timer uv.uv_timer_t | nil
 ---@field fs_event_timer uv.uv_timer_t | nil
+---@field fs_event uv.uv_fs_event_t | nil
+---
+---@alias PlayMode "normal" | "loop" | "random"
 
 ---@class PlayerState
 ---@field title string|nil
 ---@field duration integer|nil
 ---@field paused boolean|nil
 ---@field position integer|nil
+---@field mode PlayMode|nil
+---@field volume integer|nil

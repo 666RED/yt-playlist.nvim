@@ -1,5 +1,5 @@
 ---@class MpvModule
----@field mpv_cmd fun(cmd: (string|integer)[], cb?: function): nil
+---@field mpv_cmd fun(cmd: (string|integer|boolean)[], cb?: function): nil
 ---@field ensure_mpv fun(cb: function): nil
 local M = {}
 
@@ -11,6 +11,8 @@ local function spawn_mpv()
 		"--idle",
 		"--no-terminal",
 		"--input-ipc-server=/tmp/mpv.sock",
+		"--loop-playlist=inf",
+		"--shuffle=no",
 	}, { detach = true })
 end
 
