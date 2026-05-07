@@ -3,6 +3,8 @@
 ---@field update_playlist_buf fun(): nil
 ---@field update_ui fun(): nil
 ---@field get_current_song_and_update_ui fun(): nil
+---@field draw_volume_string fun(): string
+---@field update_volume_buf fun(): nil
 local M = {}
 
 -- note: MODULES
@@ -10,14 +12,18 @@ local M = {}
 ---@type GlobalStateModule
 local global_state = require("yt-playlist.global-state")
 
----@type StateModule
-local state = require("yt-playlist.state")
+---@type CommonModule
+local common = require("yt-playlist.common")
 
 ---@type UtilModule
 local util = require("yt-playlist.util")
 
 ---@type MusicModule
 local music = require("yt-playlist.music")
+
+-- note: LOCAL VARIABLES
+local LOWER_HEIGHT = global_state.LOWER_HEIGHT
+local VOLUME_WIDTH = global_state.VOLUME_WIDTH
 
 function M.update_info_buf()
 	local buf = global_state.state.info_buf
@@ -37,7 +43,7 @@ function M.update_info_buf()
 	local duration = global_state.player_state.duration
 	local paused = global_state.player_state.paused
 	local mode = global_state.player_state.mode
-	local volume = global_state.player_state.volume
+	-- local volume = global_state.player_state.volume
 
 	-- line 0: song title
 	vim.api.nvim_buf_set_extmark(buf, global_state.info_ns, 0, 0, {
@@ -64,14 +70,8 @@ function M.update_info_buf()
 		random = "🔀 Random",
 	}
 
-	-- line 3: volume
+	-- line 3: mode
 	vim.api.nvim_buf_set_extmark(buf, global_state.info_ns, 3, 0, {
-		virt_text = { { tostring(volume) } },
-		virt_text_pos = "eol",
-	})
-
-	-- line 4: mode
-	vim.api.nvim_buf_set_extmark(buf, global_state.info_ns, 4, 0, {
 		virt_text = { { mode_icons[mode or "normal"], "Normal" } },
 		virt_text_pos = "eol",
 	})
@@ -127,28 +127,98 @@ function M.update_playlist_buf()
 	end
 end
 
+function M.update_volume_buf()
+	local buf = global_state.state.volume_buf
+
+	if not buf then
+		return
+	end
+
+	local win = vim.fn.bufwinid(buf)
+
+	-- do not need to update ui
+	if win == -1 then
+		return
+	end
+
+	local function center_text(text, width)
+		-- local text_width = vim.fn.strwidth(text)
+		local str_width = vim.fn.strwidth(text)
+		local text_width = str_width % 2 == 0 and str_width or str_width + 1
+		local padding = math.floor(width / 2) - math.floor(text_width / 2)
+		return string.rep(" ", padding) .. text
+	end
+
+	local function draw_volume()
+		local volume = global_state.player_state.volume or 0
+
+		-- reserve last 2 lines for controls and volume number
+		local bar_height = (LOWER_HEIGHT - 4) * 2
+		local filled = math.floor((volume / 100) * bar_height)
+		local empty = bar_height - filled
+
+		local lines = {}
+
+		-- volume number at top
+		table.insert(lines, center_text(string.format("%d%%", volume), VOLUME_WIDTH))
+		table.insert(lines, "")
+
+		-- empty part (top)
+		for i = 1, math.ceil(empty / 2) do
+			if empty - (i * 2) < 0 then
+				table.insert(lines, center_text("█░", VOLUME_WIDTH))
+			else
+				table.insert(lines, center_text("░░", VOLUME_WIDTH))
+			end
+		end
+
+		-- filled part (bottom)
+		for i = math.ceil(filled / 2), 1, -1 do
+			if filled - (i * 2) >= 0 then
+				table.insert(lines, center_text("██", VOLUME_WIDTH))
+			end
+		end
+
+		-- controls at bottom
+		table.insert(lines, "")
+		table.insert(lines, center_text("- / + ", VOLUME_WIDTH))
+
+		vim.bo[buf].modifiable = true
+		vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+		vim.bo[buf].modifiable = false
+	end
+
+	draw_volume()
+end
+
 function M.update_ui()
 	M.update_info_buf()
 	M.update_playlist_buf()
+	M.update_volume_buf()
 
 	local title = global_state.player_state.title
 	local paused = global_state.player_state.paused
 
-	if title and not paused then
-		vim.notify("Now playing: " .. title)
-	end
+	-- todo: change later
+	-- if title and not paused then
+	-- 	vim.notify("Now playing: " .. title)
+	-- end
 end
 
 function M.get_current_song_and_update_ui()
 	music.get_current_song(function(info)
 		vim.schedule(function()
-			state.update_player_state(info)
+			common.update_player_state(info)
 
 			M.update_ui()
 
 			vim.bo[global_state.state.info_buf].modifiable = false
 		end)
 	end)
+end
+
+function M.draw_volume_string()
+	return string.rep("=", 10)
 end
 
 return M

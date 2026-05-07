@@ -2,15 +2,15 @@
 ---@field get_files fun(): Song_File[]
 ---@field update_files fun(): nil
 ---@field play_song fun(file: string, cb: fun(data: PlayerState)): nil
----@field add_to_playlist fun(file: string): nil
+---@field add_to_playlist fun(file: string): nil -- todo:
 ---@field pause_or_resume fun(cb: fun(data: PlayerState): nil): nil
----@field next_song fun(cb: function): nil
----@field prev_song fun(cb: function): nil
----@field rewind fun(cb: fun(data: PlayerState): nil): nil
----@field forward fun(cb: fun(data: PlayerState): nil): nil
----@field increase_volume fun(cb: function): nil
----@field decrease_volume fun(cb: function): nil
----@field sync_playlist fun(cb?: function): nil
+---@field next_song fun(): nil
+---@field prev_song fun(): nil
+---@field rewind fun(): nil
+---@field forward fun(): nil
+---@field increase_volume fun(): nil
+---@field decrease_volume fun(): nil
+---@field sync_playlist fun(cb?: function, shuffle?: boolean): nil
 ---@field get_current_song fun(cb: fun(data: PlayerState): nil): nil
 ---@field download_song fun(): nil
 ---@field delete_song fun(song: string): nil
@@ -46,7 +46,9 @@ local function get_files()
 	return files
 end
 
-local function sync_playlist(cb)
+local function sync_playlist(cb, shuffle)
+	shuffle = shuffle or false
+
 	local is_random = global_state.player_state.mode == "random"
 
 	local function do_sync()
@@ -68,7 +70,13 @@ local function sync_playlist(cb)
 
 			if #missing == 0 then
 				if cb then
-					cb()
+					if shuffle then
+						mpv.mpv_cmd({ "playlist-shuffle" }, function()
+							cb()
+						end)
+					else
+						cb()
+					end
 				end
 				return
 			end
@@ -77,7 +85,13 @@ local function sync_playlist(cb)
 			local function process_next(i)
 				if i > #missing then
 					if cb then
-						cb()
+						if shuffle then
+							mpv.mpv_cmd({ "playlist-shuffle" }, function()
+								cb()
+							end)
+						else
+							cb()
+						end
 					end
 					return
 				end
@@ -252,18 +266,13 @@ end
 ---@param index integer
 ---@param cb function
 local function play_current_song(index, cb)
-	local is_random = global_state.player_state.mode == "random"
-
 	mpv.mpv_cmd({ "set_property", "playlist-pos", index }, function()
 		mpv.mpv_cmd({ "set_property", "pause", false }, function()
 			vim.defer_fn(function()
 				M.get_current_song(function(data)
 					cb(data)
-					if is_random then
-						mpv.mpv_cmd({ "playlist-shuffle" })
-					end
 				end)
-			end, 100)
+			end, 10)
 		end)
 	end)
 end
@@ -293,9 +302,17 @@ function M.play_song(file, cb)
 	mpv.mpv_cmd({ "get_property", "playlist" }, function(playlist)
 		-- if playlist is nil or empty
 		if not playlist or #playlist == 0 then
-			sync_playlist(function()
-				play_current_song(song.index - 1, cb)
-			end)
+			local is_random = global_state.player_state.mode == "random"
+
+			if is_random then
+				sync_playlist(function()
+					play_current_song(song.index - 1, cb)
+				end, true)
+			else
+				sync_playlist(function()
+					play_current_song(song.index - 1, cb)
+				end)
+			end
 
 			return
 		end
@@ -332,65 +349,32 @@ function M.pause_or_resume(cb)
 	end)
 end
 
-function M.next_song(cb)
+function M.next_song()
 	mpv.mpv_cmd({ "playlist-next" }, function()
-		mpv.mpv_cmd({ "set_property", "pause", false }, function()
-			vim.defer_fn(function()
-				M.get_current_song(function(data)
-					cb(data)
-				end)
-			end, 100)
-		end)
+		mpv.mpv_cmd({ "set_property", "pause", false })
 	end)
 end
 
-function M.prev_song(cb)
+function M.prev_song()
 	mpv.mpv_cmd({ "playlist-prev" }, function()
-		mpv.mpv_cmd({ "set_property", "pause", false }, function()
-			vim.defer_fn(function()
-				M.get_current_song(function(data)
-					cb(data)
-				end)
-			end, 100)
-		end)
+		mpv.mpv_cmd({ "set_property", "pause", false })
 	end)
 end
 
-function M.rewind(cb)
-	mpv.mpv_cmd({ "seek", -10 }, function()
-		mpv.mpv_cmd({ "get_property", "time-pos" }, function(position)
-			cb({ position = position })
-		end)
-	end)
+function M.rewind()
+	mpv.mpv_cmd({ "seek", -10 })
 end
 
-function M.forward(cb)
-	mpv.mpv_cmd({ "seek", 10 }, function()
-		mpv.mpv_cmd({ "get_property", "time-pos" }, function(position)
-			cb({ position = position })
-		end)
-	end)
+function M.forward()
+	mpv.mpv_cmd({ "seek", 10 })
 end
 
---todo: may remove
--- function M.stop()
--- 	mpv.mpv_cmd({ "stop" })
--- end
-
-function M.increase_volume(cb)
-	mpv.mpv_cmd({ "add", "volume", 5 }, function()
-		mpv.mpv_cmd({ "get_property", "volume" }, function(volume)
-			cb({ volume = volume })
-		end)
-	end)
+function M.increase_volume()
+	mpv.mpv_cmd({ "add", "volume", 5 })
 end
 
-function M.decrease_volume(cb)
-	mpv.mpv_cmd({ "add", "volume", -5 }, function()
-		mpv.mpv_cmd({ "get_property", "volume" }, function(volume)
-			cb({ volume = volume })
-		end)
-	end)
+function M.decrease_volume()
+	mpv.mpv_cmd({ "add", "volume", -5 })
 end
 
 function M.download_song()
