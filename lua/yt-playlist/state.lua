@@ -15,16 +15,18 @@ local music = require("yt-playlist.music")
 ---@type GlobalStateModule
 local global_state = require("yt-playlist.global-state")
 
+local constants = require("yt-playlist.constants")
+
 ---@type TimerModule
 local timer = require("yt-playlist.timer")
 
 -- note: LOCAL CONSTANTS
 
-local TOTAL_WIDTH = global_state.TOTAL_WIDTH
-local UPPER_HEIGHT = global_state.UPPER_HEIGHT
-local LOWER_HEIGHT = global_state.LOWER_HEIGHT
-local INFO_WIDTH = global_state.INFO_WIDTH
-local VOLUME_WIDTH = global_state.VOLUME_WIDTH
+local TOTAL_WIDTH = constants.TOTAL_WIDTH
+local UPPER_HEIGHT = constants.UPPER_HEIGHT
+local LOWER_HEIGHT = constants.LOWER_HEIGHT
+local INFO_WIDTH = constants.INFO_WIDTH
+local VOLUME_WIDTH = constants.VOLUME_WIDTH
 
 -- note: LOCAL FUNCTIONS
 

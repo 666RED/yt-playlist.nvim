@@ -21,9 +21,11 @@ local util = require("yt-playlist.util")
 ---@type MusicModule
 local music = require("yt-playlist.music")
 
+local constants = require("yt-playlist.constants")
+
 -- note: LOCAL VARIABLES
-local LOWER_HEIGHT = global_state.LOWER_HEIGHT
-local VOLUME_WIDTH = global_state.VOLUME_WIDTH
+local LOWER_HEIGHT = constants.LOWER_HEIGHT
+local VOLUME_WIDTH = constants.VOLUME_WIDTH
 
 function M.update_info_buf()
 	local buf = global_state.state.info_buf

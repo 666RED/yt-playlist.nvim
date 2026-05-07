@@ -4,9 +4,6 @@
 ---@field start_mpv_listener fun(callbacks: MpvListenerCallbacks): uv.uv_pipe_t| nil -- todo: change later
 local M = {}
 
----@type GlobalStateModule
-local global_state = require("yt-playlist.global-state")
-
 local function spawn_mpv()
 	os.remove("/tmp/mpv.sock")
 
