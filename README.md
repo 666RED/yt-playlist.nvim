@@ -53,7 +53,7 @@ Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
 {
-  "RED666/yt-playlist.nvim",
+  "666RED/yt-playlist.nvim",
   config = function()
     require("yt-playlist").setup()
   end,
@@ -64,7 +64,7 @@ Using [packer.nvim](https://github.com/wbthomason/packer.nvim):
 
 ```lua
 use {
-  "RED666/yt-playlist.nvim",
+  "666RED/yt-playlist.nvim",
   config = function()
     require("yt-playlist").setup()
   end
@@ -126,11 +126,11 @@ require("yt-playlist").setup({
 ## Contributing
 
 Contributions, issues, and feature requests are welcome!
-Feel free to open an [issue](https://github.com/RED666/yt-playlist.nvim/issues) or submit a pull request.
+Feel free to open an [issue](https://github.com/666RED/yt-playlist.nvim/issues) or submit a pull request.
 
 ---
 
 ## License
 
-MIT © [RED666](https://github.com/RED666)
+MIT © [666RED](https://github.com/666RED)
 
