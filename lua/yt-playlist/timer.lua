@@ -1,8 +1,8 @@
 ---@class TimerModule
----@field start_fs_event_timer fun(cb: function): nil
+---@field start_fs_event_timer fun(): nil
 ---@field stop_position_timer fun(): nil
 ---@field stop_fs_event_timer fun(): nil
----@field start_position_timer fun(update_info_buf: function): nil
+---@field start_position_timer fun(): nil
 ---@field start_mpv_listener fun(): nil
 ---@field stop_mpv_listener fun(): nil
 local M = {}
@@ -12,22 +12,23 @@ local M = {}
 ---@type GlobalStateModule
 local global_state = require("yt-playlist.global-state")
 
----@type MpvModule
-local mpv = require("yt-playlist.mpv")
-
 ---@type UiModule
 local ui = require("yt-playlist.ui")
 
 ---@type MusicModule
 local music = require("yt-playlist.music")
 
----@type CommonModule
-local common = require("yt-playlist.common")
+---@type AsyncModule
+local async = require("yt-playlist.async")
+
+---@type ControllerModule
+local controller = require("yt-playlist.controller")
 
 local constants = require("yt-playlist.constants")
 
-function M.start_fs_event_timer(cb)
+function M.start_fs_event_timer()
 	local fs_event = vim.loop.new_fs_event()
+
 	if not fs_event then
 		return
 	end
@@ -60,8 +61,11 @@ function M.start_fs_event_timer(cb)
 					global_state.timer.fs_event_timer:close()
 					global_state.timer.fs_event_timer = nil
 
-					-- update ui
-					cb()
+					async.sync(function()
+						async.wait(music.update_files())
+						async.wait(music.sync_playlist())
+						async.wait(ui.get_current_song_and_update_ui())
+					end)()
 				end)
 			)
 		end)
@@ -88,7 +92,7 @@ function M.stop_fs_event_timer()
 	end
 end
 
-function M.start_position_timer(update_info_buf)
+function M.start_position_timer()
 	if global_state.timer.position_timer then
 		M.stop_position_timer()
 	end
@@ -99,47 +103,13 @@ function M.start_position_timer(update_info_buf)
 		if global_state.player_state.position and not global_state.player_state.paused then
 			-- update song time-pos every second in info_buf
 			global_state.player_state.position = math.floor(global_state.player_state.position) + 1
-			vim.schedule(function()
-				update_info_buf()
-			end)
+			ui.update_info_buf()
 		end
 	end)
 end
 
 function M.start_mpv_listener()
-	---@param cb function
-	---@return nil
-	local function get_current_song_and_update_state_ui(cb)
-		vim.defer_fn(function()
-			music.get_current_song(function(data)
-				vim.schedule(function()
-					common.update_player_state(data)
-					cb()
-				end)
-			end)
-		end, 10)
-	end
-
-	global_state.timer.mpv_listener = mpv.start_mpv_listener({
-		update_playlist_buf = function()
-			get_current_song_and_update_state_ui(ui.update_playlist_buf)
-		end,
-		update_info_buf = function()
-			get_current_song_and_update_state_ui(ui.update_info_buf)
-		end,
-		update_volume_buf = function(data)
-			vim.schedule(function()
-				common.update_player_state(data)
-				ui.update_volume_buf()
-			end)
-		end,
-		update_playlist_and_info_buf = function()
-			get_current_song_and_update_state_ui(function()
-				ui.update_playlist_buf()
-				ui.update_info_buf()
-			end)
-		end,
-	})
+	global_state.timer.mpv_listener = controller.start_mpv_listener()
 end
 
 function M.stop_mpv_listener()

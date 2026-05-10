@@ -23,55 +23,73 @@ local ui = require("yt-playlist.ui")
 ---@type CommonModule
 local common = require("yt-playlist.common")
 
-function M.setup()
-	vim.api.nvim_create_user_command("YtPlayList", function()
-		if global_state.state.is_open then
-			state.hide_playlist()
-			return
+---@type AsyncModule
+local async = require("yt-playlist.async")
+
+-- note: LOCAL FUNCTIONS
+local function play_song()
+	return async.sync(function()
+		local file = vim.api.nvim_get_current_line()
+
+		if file == global_state.player_state.title then
+			return nil
 		end
 
-		require("yt-playlist.command_config").setup()
+		async.wait(music.play_song(file))
 
-		music.setup()
+		local player_state = async.wait(music.get_current_song())
 
-		state.show_playlist()
+		common.update_player_state(player_state)
 
-		mpv.ensure_mpv(function(result)
-			if result then
-				vim.print("Connected to mpv")
+		async.wait(ui.update_ui())
+	end)
+end
 
-				music.sync_mpv_ids()
+-- note: SETUP
 
-				ui.get_current_song_and_update_ui()
-			end
-		end)
-
-		local function play_song()
-			local file = vim.api.nvim_get_current_line()
-
-			if file == global_state.player_state.title then
+function M.setup()
+	vim.api.nvim_create_user_command("YtPlayList", function()
+		async.sync(function()
+			if global_state.state.is_open then
+				state.hide_playlist()
 				return
 			end
 
-			music.play_song(file, function(song)
-				common.update_player_state(song)
+			require("yt-playlist.command_config").setup()
 
-				vim.schedule(function()
-					ui.update_ui()
-				end)
+			async.wait(music.setup())
+
+			state.show_playlist()
+
+			local result = async.wait(mpv.ensure_mpv())
+
+			if result then
+				vim.print("Connected to mpv")
+
+				async.wait(music.sync_mpv_ids())
+
+				async.wait(ui.get_current_song_and_update_ui())
+			end
+
+			-- Enter song
+			vim.schedule(function()
+				vim.api.nvim_buf_set_keymap(global_state.state.playlist_buf, "n", "<CR>", "", {
+					callback = function()
+						async.sync(function()
+							async.wait(play_song())
+						end)()
+					end,
+				})
 			end)
-		end
 
-		-- Enter song
-		vim.api.nvim_buf_set_keymap(global_state.state.playlist_buf, "n", "<CR>", "", {
-			callback = play_song,
-		})
+			timer.start_position_timer()
 
-		timer.start_position_timer(ui.get_current_song_and_update_ui, ui.update_info_buf)
+			vim.schedule(function()
+				timer.start_fs_event_timer()
+			end)
 
-		timer.start_fs_event_timer(ui.get_current_song_and_update_ui)
-
-		timer.start_mpv_listener()
+			timer.start_mpv_listener()
+		end)()
 	end, {})
 end
 

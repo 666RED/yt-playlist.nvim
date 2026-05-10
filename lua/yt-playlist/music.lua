@@ -1,21 +1,20 @@
 ---@class MusicModule
+---@field sync_playlist fun(): AsyncThunk<nil>
 ---@field get_files fun(): Song_File[]
----@field update_files fun(): nil
----@field play_song fun(file: string, cb: fun(data: PlayerState)): nil
----@field add_to_playlist fun(file: string): nil -- todo:
----@field pause_or_resume fun(cb: fun(data: PlayerState): nil): nil
----@field next_song fun(): nil
----@field prev_song fun(): nil
----@field rewind fun(): nil
----@field forward fun(): nil
----@field increase_volume fun(): nil
----@field decrease_volume fun(): nil
----@field sync_playlist fun(cb?: function, shuffle?: boolean): nil
----@field get_current_song fun(cb: fun(data: PlayerState): nil): nil
+---@field update_files fun(): AsyncThunk<nil>
+---@field get_current_song fun(): AsyncThunk<PlayerState>
+---@field play_song fun(file: string): AsyncThunk<nil>
+---@field pause_or_resume fun(): AsyncThunk<boolean>
+---@field next_song fun(): AsyncThunk<nil>
+---@field prev_song fun(): AsyncThunk<nil>
+---@field rewind fun(): AsyncThunk<nil>
+---@field forward fun(): AsyncThunk<nil>
+---@field increase_volume fun(volume?: integer): AsyncThunk<nil>
+---@field decrease_volume fun(volume?: integer): AsyncThunk<nil>
 ---@field download_song fun(): nil
----@field delete_song fun(song: string): nil
----@field switch_mode fun(cb: function): nil
----@field sync_mpv_ids fun(): nil
+---@field delete_song fun(file: string): function
+---@field switch_mode fun(): function
+---@field sync_mpv_ids fun(): function
 local M = {}
 
 ---@type Song_File[]
@@ -38,86 +37,12 @@ local util = require("yt-playlist.util")
 ---@type DataModule
 local local_state = require("yt-playlist.data")
 
+---@type AsyncModule
+local async = require("yt-playlist.async")
+
 local constants = require("yt-playlist.constants")
 
 -- note: LOCAL FUNCTIONS
-
-local function get_files()
-	return files
-end
-
-local function sync_playlist(cb, shuffle)
-	shuffle = shuffle or false
-
-	local is_random = global_state.player_state.mode == "random"
-
-	local function do_sync()
-		mpv.mpv_cmd({ "get_property", "playlist" }, function(playlist)
-			playlist = playlist or {}
-
-			local mpv_set = {}
-			for _, item in ipairs(playlist) do
-				mpv_set[util.norm(item.filename)] = true
-			end
-
-			local missing = {}
-			for index, file in ipairs(files) do
-				local fullpath = constants.MUSIC_PATH .. "/" .. file.full_name
-				if not mpv_set[util.norm(fullpath)] then
-					table.insert(missing, { fullpath = fullpath, index = index })
-				end
-			end
-
-			if #missing == 0 then
-				if cb then
-					if shuffle then
-						mpv.mpv_cmd({ "playlist-shuffle" }, function()
-							cb()
-						end)
-					else
-						cb()
-					end
-				end
-				return
-			end
-
-			-- process sequentially using recursion
-			local function process_next(i)
-				if i > #missing then
-					if cb then
-						if shuffle then
-							mpv.mpv_cmd({ "playlist-shuffle" }, function()
-								cb()
-							end)
-						else
-							cb()
-						end
-					end
-					return
-				end
-
-				local item = missing[i]
-				mpv.mpv_cmd({ "loadfile", item.fullpath, "append" }, function()
-					mpv.mpv_cmd({ "get_property", "playlist-count" }, function(count)
-						mpv.mpv_cmd({ "playlist-move", count - 1, item.index - 1 }, function()
-							process_next(i + 1) -- process next only after current is done
-						end)
-					end)
-				end)
-			end
-
-			process_next(1)
-		end)
-	end
-
-	if is_random then
-		mpv.mpv_cmd({ "playlist-unshuffle" }, function()
-			do_sync()
-		end)
-	else
-		do_sync()
-	end
-end
 
 ---@return string[]
 local function get_all_files()
@@ -130,83 +55,6 @@ local function get_all_files()
 	end
 
 	return all_files
-end
-
-function M.update_files()
-	files = {}
-	local all_files = get_all_files()
-
-	for _, file in ipairs(all_files) do
-		table.insert(files, util.get_song_file(file))
-	end
-
-	M.sync_mpv_ids()
-end
-
-function M.get_current_song(cb)
-	---@type PlayerState
-	local info = {}
-	local pending = 5
-
-	local function done()
-		pending = pending - 1
-
-		if pending <= 0 then
-			local_state.load_mode()
-			info.mode = local_state.load_mode()
-			cb(info)
-		end
-	end
-
-	mpv.mpv_cmd({ "get_property", "media-title" }, function(data)
-		if data then
-			info.title = data and util.remove_extension(data) or nil
-		else
-			pending = 0
-		end
-
-		done()
-	end)
-
-	mpv.mpv_cmd({ "get_property", "time-pos" }, function(data)
-		if data then
-			info.position = data
-		else
-			pending = 0
-		end
-
-		done()
-	end)
-
-	mpv.mpv_cmd({ "get_property", "duration" }, function(data)
-		if data then
-			info.duration = data
-		else
-			pending = 0
-		end
-
-		done()
-	end)
-
-	mpv.mpv_cmd({ "get_property", "pause" }, function(data)
-		if data ~= nil then
-			info.paused = data
-		else
-			pending = 0
-		end
-
-		done()
-	end)
-
-	mpv.mpv_cmd({ "get_property", "volume" }, function(volume)
-		if volume then
-			info.volume = volume
-		else
-			info.volume = 100
-		end
-
-		done()
-	end)
 end
 
 local function build_cmd(url, opts)
@@ -227,27 +75,27 @@ local function build_cmd(url, opts)
 end
 
 ---@param original_files Song_File[]
+---@return AsyncThunk<nil>
 local function insert_new_song(original_files)
-	local is_random = global_state.player_state.mode == "random"
-	M.update_files()
+	return async.sync(function()
+		local is_random = global_state.player_state.mode == "random"
+		async.wait(M.update_files())
 
-	for i = 1, #files, 1 do
-		-- new song found
-		if not original_files[i] or original_files[i].full_name ~= files[i].full_name then
-			local fullpath = constants.MUSIC_PATH .. "/" .. files[i].full_name
-			if is_random then
-				mpv.mpv_cmd({ "playlist-unshuffle" }, function()
-					mpv.mpv_cmd({ "loadfile", fullpath, "insert-at", i - 1 }, function()
-						mpv.mpv_cmd({ "playlist-shuffle" })
-					end)
-				end)
+		for i = 1, #files, 1 do
+			-- new song found
+			if not original_files[i] or original_files[i].full_name ~= files[i].full_name then
+				local fullpath = constants.MUSIC_PATH .. "/" .. files[i].full_name
+				if is_random then
+					async.wait(mpv.mpv_cmd({ "playlist-unshuffle" }))
+					async.wait(mpv.mpv_cmd({ "loadfile", fullpath, "insert-at", i - 1 }))
+					async.wait(mpv.mpv_cmd({ "playlist-shuffle" }))
+				else
+					async.wait(mpv.mpv_cmd({ "loadfile", fullpath, "insert-at", i - 1 }))
+				end
 				break
-			else
-				mpv.mpv_cmd({ "loadfile", fullpath, "insert-at", i - 1 })
 			end
-			break
 		end
-	end
+	end)
 end
 
 ---@param file string
@@ -255,8 +103,7 @@ end
 local function get_song_file(file)
 	for i, song in ipairs(files) do
 		if song.filename == file then
-			local result = vim.tbl_extend("force", song, { index = i })
-			return result
+			return vim.tbl_extend("force", song, { index = i })
 		end
 	end
 
@@ -264,16 +111,10 @@ local function get_song_file(file)
 end
 
 ---@param index integer
----@param cb function
-local function play_current_song(index, cb)
-	mpv.mpv_cmd({ "set_property", "playlist-pos", index }, function()
-		mpv.mpv_cmd({ "set_property", "pause", false }, function()
-			vim.defer_fn(function()
-				M.get_current_song(function(data)
-					cb(data)
-				end)
-			end, 10)
-		end)
+local function play_current_song(index)
+	return async.sync(function()
+		async.wait(mpv.mpv_cmd({ "set_property", "playlist-pos", index }))
+		async.wait(mpv.mpv_cmd({ "set_property", "pause", false }))
 	end)
 end
 
@@ -291,30 +132,111 @@ end
 
 -- note: EXPORT FUNCTIONS
 
-function M.play_song(file, cb)
-	local song = get_song_file(file)
+function M.sync_playlist()
+	return async.sync(function()
+		local is_random = global_state.player_state.mode == "random"
 
-	if not song then
-		return
-	end
+		if is_random then
+			async.wait(mpv.mpv_cmd({ "playlist-unshuffle" }))
+		end
 
-	-- check if files and playlist are synced
-	mpv.mpv_cmd({ "get_property", "playlist" }, function(playlist)
-		-- if playlist is nil or empty
-		if not playlist or #playlist == 0 then
-			local is_random = global_state.player_state.mode == "random"
+		local playlist = async.wait(mpv.mpv_cmd({ "get_property", "playlist" })) or {}
 
+		local mpv_set = {}
+
+		for _, item in ipairs(playlist) do
+			mpv_set[util.norm(item.filename)] = true
+		end
+
+		local missing = {}
+
+		for index, file in ipairs(files) do
+			local fullpath = constants.MUSIC_PATH .. "/" .. file.full_name
+			if not mpv_set[util.norm(fullpath)] then
+				table.insert(missing, { fullpath = fullpath, index = index })
+			end
+		end
+
+		-- if no new files
+		if #missing == 0 then
 			if is_random then
-				sync_playlist(function()
-					play_current_song(song.index - 1, cb)
-				end, true)
-			else
-				sync_playlist(function()
-					play_current_song(song.index - 1, cb)
-				end)
+				async.wait(mpv.mpv_cmd({ "playlist-shuffle" }))
 			end
 
 			return
+		end
+
+		-- append missing files
+		for _, item in ipairs(missing) do
+			async.wait(mpv.mpv_cmd({ "loadfile", item.fullpath, "append" }))
+			local count = async.wait(mpv.mpv_cmd({ "get_property", "playlist-count" }))
+			async.wait(mpv.mpv_cmd({ "playlist-move", count - 1, item.index - 1 }))
+		end
+
+		if is_random then
+			async.wait(mpv.mpv_cmd({ "playlist-shuffle" }))
+		end
+
+		playlist = async.wait(mpv.mpv_cmd({ "get_property", "playlist" })) or {}
+		vim.print(playlist)
+	end)
+end
+
+function M.get_files()
+	return files
+end
+
+function M.update_files()
+	return async.sync(function()
+		vim.schedule(function()
+			files = {}
+			local all_files = get_all_files()
+
+			for _, file in ipairs(all_files) do
+				table.insert(files, util.get_song_file(file))
+			end
+		end)
+
+		async.wait(M.sync_mpv_ids())
+	end)
+end
+
+function M.get_current_song()
+	return async.sync(function()
+		local title = async.wait(mpv.mpv_cmd({ "get_property", "media-title" }))
+		local time_pos = async.wait(mpv.mpv_cmd({ "get_property", "time-pos" }))
+		local duration = async.wait(mpv.mpv_cmd({ "get_property", "duration" }))
+		local paused = async.wait(mpv.mpv_cmd({ "get_property", "pause" }))
+		local volume = async.wait(mpv.mpv_cmd({ "get_property", "volume" }))
+		local state = local_state.load_state()
+
+		---@type PlayerState
+		return {
+			title = title,
+			position = time_pos,
+			duration = duration,
+			paused = paused,
+			volume = volume,
+			mode = (state and state.mode) or "normal",
+		}
+	end)
+end
+
+function M.play_song(file)
+	return async.sync(function()
+		local song = get_song_file(file)
+
+		if not song then
+			return
+		end
+
+		-- check if files and playlist are synced
+		local playlist = async.wait(mpv.mpv_cmd({ "get_property", "playlist" })) or {}
+
+		if #playlist == 0 then
+			async.wait(M.sync_playlist())
+
+			async.wait(play_current_song(song.index - 1))
 		end
 
 		local mpv_index = nil
@@ -327,65 +249,73 @@ function M.play_song(file, cb)
 		end
 
 		if not mpv_index then
-			sync_playlist(function()
-				play_current_song(song.index - 1, cb)
-			end)
+			async.wait(M.sync_playlist())
+			async.wait(play_current_song(song.index - 1))
 			return
 		end
 
-		play_current_song(mpv_index, cb)
+		async.wait(play_current_song(song.index - 1))
 	end)
 end
 
-function M.add_to_playlist(file)
-	mpv.mpv_cmd({ "loadfile", file, "append" })
-end
+function M.pause_or_resume()
+	return async.sync(function()
+		async.wait(mpv.mpv_cmd({ "cycle", "pause" }))
 
-function M.pause_or_resume(cb)
-	mpv.mpv_cmd({ "cycle", "pause" }, function()
-		mpv.mpv_cmd({ "get_property", "pause" }, function(paused)
-			cb({ paused = paused })
-		end)
+		local paused = async.wait(mpv.mpv_cmd({ "get_property", "pause" }))
+		return paused
 	end)
 end
 
 function M.next_song()
-	mpv.mpv_cmd({ "playlist-next" }, function()
-		mpv.mpv_cmd({ "set_property", "pause", false })
+	return async.sync(function()
+		async.wait(mpv.mpv_cmd({ "playlist-next" }))
+		async.wait(mpv.mpv_cmd({ "set_property", "pause", false }))
 	end)
 end
 
 function M.prev_song()
-	mpv.mpv_cmd({ "playlist-prev" }, function()
-		mpv.mpv_cmd({ "set_property", "pause", false })
+	return async.sync(function()
+		async.wait(mpv.mpv_cmd({ "playlist-prev" }))
+		async.wait(mpv.mpv_cmd({ "set_property", "pause", false }))
 	end)
 end
 
 function M.rewind()
-	mpv.mpv_cmd({ "seek", -10 })
+	return async.sync(function()
+		async.wait(mpv.mpv_cmd({ "seek", -10 }))
+	end)
 end
 
 function M.forward()
-	mpv.mpv_cmd({ "seek", 10 })
+	return async.sync(function()
+		async.wait(mpv.mpv_cmd({ "seek", 10 }))
+	end)
 end
 
-function M.increase_volume()
-	mpv.mpv_cmd({ "add", "volume", 5 })
+function M.increase_volume(volume)
+	volume = volume or 5
+
+	return async.sync(function()
+		async.wait(mpv.mpv_cmd({ "add", "volume", volume }))
+	end)
 end
 
-function M.decrease_volume()
-	mpv.mpv_cmd({ "add", "volume", -5 })
+function M.decrease_volume(volume)
+	volume = volume or 5
+
+	return async.sync(function()
+		async.wait(mpv.mpv_cmd({ "add", "volume", -volume }))
+	end)
 end
 
 function M.download_song()
-	vim.ui.input({ prompt = "Youtube video url: " }, function(url)
-		if not url then
-			vim.print("Cancelled")
-			return
-		end
+	return async.sync(function()
+		local url_input = async.wrap(vim.ui.input)
+		local url = async.wait(url_input({ prompt = "Youtube vidoe url: " }))
 
-		if url == "" then
-			vim.print("Cancelled")
+		if not url then
+			vim.notify("Cancelled")
 			return
 		end
 
@@ -396,102 +326,93 @@ function M.download_song()
 			return
 		end
 
-		vim.ui.select({ "mp3", "m4a", "opus", "flac" }, {
-			prompt = "Select audio format:",
-		}, function(format)
-			if not format then
-				vim.print("Cancelled")
-				return
-			end
+		local format_select = async.wrap(vim.ui.select)
+		local format = async.wait(format_select({ "mp3", "m4a", "opus", "flac" }, { prompt = "Select audio format:" }))
 
-			if format == "" then
-				vim.print("Cancelled")
-				return
-			end
+		if not format or format == "" then
+			vim.notify("Cancelled")
+			return
+		end
 
-			vim.ui.select({ "128k", "192k", "256k", "320k" }, {
-				prompt = "Select quality:",
-			}, function(quality)
-				if not quality then
-					vim.print("Cancelled")
-					return
-				end
+		local quality_select = async.wrap(vim.ui.select)
+		local quality = async.wait(quality_select({ "128k", "192k", "256k", "320k" }, { prompt = "Select quality:" }))
 
-				if quality == "" then
-					vim.print("Cancelled")
-					return
-				end
+		if not quality or quality == "" then
+			vim.notify("Cancelled")
+			return
+		end
 
-				vim.ui.input({ prompt = "Name (optional): " }, function(name)
-					if not name then
-						vim.print("Cancelled")
-						return
+		local name_input = async.wrap(vim.ui.input)
+		local name = async.wait(name_input({ prompt = "Name (optional): " }))
+
+		if not name then
+			vim.notify("Cancelled")
+			return
+		end
+
+		local cmd = build_cmd(url, { format = format, quality = quality, name = name })
+
+		local stderr_lines = {}
+
+		local jobstart = function(_, opts)
+			return function(step)
+				opts = opts or {}
+
+				local old_exit = opts.on_exit
+
+				opts.on_exit = function(job_id, exit_code, event)
+					if old_exit then
+						old_exit(job_id, exit_code, event)
 					end
 
-					local cmd = build_cmd(url, { format = format, quality = quality, name = name })
+					step(exit_code)
+				end
 
-					local stderr_lines = {}
+				vim.fn.jobstart(cmd, opts)
+			end
+		end
 
-					-- call yt-dlp to download music
-					vim.fn.jobstart(cmd, {
-						-- display download progress
-						on_stdout = function(_, data, _)
-							for _, line in ipairs(data) do
-								if line:match("%[download%]") then
-									vim.schedule(function()
-										vim.notify(line, vim.log.levels.INFO)
-									end)
-								end
-							end
-						end,
-						on_exit = function(_, exit_code, _)
-							-- download failed
-							if exit_code ~= 0 then
-								vim.schedule(function()
-									vim.notify(
-										"Download failed:\n" .. table.concat(stderr_lines, "\n"),
-										vim.log.levels.ERROR
-									)
-								end)
-							else
-								vim.schedule(function()
-									insert_new_song(files)
-									vim.notify("Download completed!")
-								end)
-							end
-						end,
-						on_stderr = function(_, data, _)
-							for _, line in ipairs(data) do
-								if line ~= "" then
-									table.insert(stderr_lines, line)
-								end
-							end
-						end,
-					})
-				end)
-			end)
+		local exit_code = async.wait(jobstart(cmd, {
+			on_stdout = function(_, data, _)
+				for _, line in ipairs(data) do
+					if line:match("%[download%]") then
+						vim.schedule(function()
+							vim.notify(line)
+						end)
+					end
+				end
+			end,
+
+			on_stderr = function(_, data, _)
+				for _, line in ipairs(data) do
+					if line ~= "" then
+						table.insert(stderr_lines, line)
+					end
+				end
+			end,
+		}))
+
+		if exit_code ~= 0 then
+			vim.notify("Download failed")
+			return
+		end
+
+		async.wait(insert_new_song(files))
+
+		vim.schedule(function()
+			vim.notify("Download completed!")
 		end)
 	end)
 end
 
 function M.delete_song(file)
-	local function remove_from_playlist(index, fullpath, song)
-		mpv.mpv_cmd({ "playlist-remove", index }, function()
-			vim.schedule(function()
-				local ok, err = pcall(vim.fs.rm, fullpath)
+	return async.sync(function()
+		local select = async.wrap(vim.ui.select)
 
-				if ok then
-					vim.notify("Deleted: " .. song.filename)
-				else
-					vim.notify("Failed to delete the file: " .. ", err: " .. err)
-				end
-			end)
-		end)
-	end
+		local result = async.wait(select({ "No", "Yes" }, { prompt = "Delete " .. file .. "?" }))
 
-	-- confirmation
-	vim.ui.select({ "No", "Yes" }, { prompt = "Delete " .. file .. "?" }, function(result)
 		if not result or result == "No" then
+			vim.notify("Cancelled")
 			return
 		end
 
@@ -504,59 +425,60 @@ function M.delete_song(file)
 
 		local fullpath = constants.MUSIC_PATH .. "/" .. song.full_name
 
-		mpv.mpv_cmd({ "get_property", "playlist" }, function(playlist)
-			local mpv_index = nil
+		local playlist = async.wait(mpv.mpv_cmd({ "get_property", "playlist" })) or {}
 
-			for i, item in ipairs(playlist) do
-				if item.id == song.mpv_id then
-					mpv_index = i - 1 -- 0-based
-					break
-				end
+		local mpv_index = nil
+
+		for i, item in ipairs(playlist) do
+			if item.id == song.mpv_id then
+				mpv_index = i - 1
+				break
 			end
+		end
 
-			remove_from_playlist(mpv_index, fullpath, song)
+		async.wait(mpv.mpv_cmd({ "playlist-remove", mpv_index }))
+
+		local ok, err = pcall(vim.fs.rm, fullpath)
+
+		vim.schedule(function()
+			if ok then
+				vim.notify("Deleted: " .. song.filename)
+			else
+				vim.notify("Failed to delete file: " .. err)
+			end
 		end)
 	end)
 end
 
-function M.switch_mode(cb)
-	local current_mode = local_state.load_mode()
-	local new_mode = next_mode(current_mode)
+function M.switch_mode()
+	return async.sync(function()
+		local current_mode = local_state.load_state()
+		local new_mode = next_mode(current_mode and current_mode.mode or "normal")
 
-	if new_mode == "normal" then
-		mpv.mpv_cmd({ "set_property", "loop-file", "no" }, function()
-			mpv.mpv_cmd({ "playlist-unshuffle" }, function()
-				if cb then
-					cb(new_mode)
-				end
-			end)
-		end)
-	elseif new_mode == "loop" then
-		mpv.mpv_cmd({ "set_property", "loop-file", "inf" }, function()
-			if cb then
-				cb(new_mode)
-			end
-		end)
-	elseif new_mode == "random" then
-		mpv.mpv_cmd({ "set_property", "loop-file", "no" }, function()
-			mpv.mpv_cmd({ "playlist-shuffle" }, function()
-				if cb then
-					cb(new_mode)
-				end
-			end)
-		end)
-	end
+		if new_mode == "normal" then
+			async.wait(mpv.mpv_cmd({ "set_property", "loop-file", "no" }))
+			async.wait(mpv.mpv_cmd({ "playlist-unshuffle" }))
+		elseif new_mode == "loop" then
+			async.wait(mpv.mpv_cmd({ "set_property", "loop-file", "inf" }))
+		else
+			async.wait(mpv.mpv_cmd({ "set_property", "loop-file", "no" }))
+			async.wait(mpv.mpv_cmd({ "playlist-shuffle" }))
+		end
+
+		local_state.save_state({ mode = new_mode })
+
+		return new_mode
+	end)
 end
 
 function M.sync_mpv_ids()
-	mpv.mpv_cmd({ "get_property", "playlist" }, function(playlist)
-		if not playlist then
-			return
-		end
+	return async.sync(function()
+		local playlist = async.wait(mpv.mpv_cmd({ "get_property", "playlist" })) or {}
 
 		-- match mpv playlist items with local files by filename
 		for _, item in ipairs(playlist) do
 			local norm_filename = util.norm(item.filename)
+
 			for _, file in ipairs(files) do
 				local fullpath = util.norm(constants.MUSIC_PATH .. "/" .. file.full_name)
 
@@ -570,10 +492,9 @@ function M.sync_mpv_ids()
 end
 
 function M.setup()
-	M.update_files()
+	return async.sync(function()
+		async.wait(M.update_files())
+	end)
 end
-
-M.get_files = get_files
-M.sync_playlist = sync_playlist
 
 return M

@@ -1,5 +1,7 @@
 local M = {}
 
+-- note: MODULES
+
 ---@type MusicModule
 local music = require("yt-playlist.music")
 
@@ -9,66 +11,89 @@ local common = require("yt-playlist.common")
 ---@type UiModule
 local ui = require("yt-playlist.ui")
 
+---@type AsyncModule
+local async = require("yt-playlist.async")
+
 ---@type DataModule
 local local_state = require("yt-playlist.data")
 
-local music_commands = require("yt-playlist.music_commands")
-
 function M.setup()
-	vim.api.nvim_create_user_command(music_commands.PlayPause, function()
-		music.pause_or_resume(function(data)
-			common.update_player_state({ paused = data.paused })
-			vim.schedule(function()
-				ui.update_ui()
-			end)
-		end)
+	vim.api.nvim_create_user_command("PlayPause", function()
+		async.sync(function()
+			local paused = async.wait(music.pause_or_resume())
+			common.update_player_state({ paused = paused })
+			async.wait(ui.update_ui())
+		end)()
 	end, { desc = "Play or pause the music" })
+
+	vim.api.nvim_create_user_command("DecreaseVolume", function(opts)
+		local volume = opts.args
+
+		music.decrease_volume(tonumber(volume))()
+	end, { desc = "Decrease volume (5 by default)", nargs = "*" })
+
+	vim.api.nvim_create_user_command("IncreaseVolume", function(opts)
+		local volume = opts.args
+
+		music.increase_volume(tonumber(volume))()
+	end, { desc = "Increase volume (5 by default)", nargs = "*" })
+
+	vim.api.nvim_create_user_command("NextSong", function()
+		music.next_song()()
+	end, { desc = "Play next song" })
+
+	vim.api.nvim_create_user_command("PrevSong", function()
+		music.prev_song()()
+	end, { desc = "Play previous song" })
 
 	return {
 		PlayPause = function()
-			music.pause_or_resume(function(data)
-				common.update_player_state({ paused = data.paused })
-				vim.schedule(function()
-					ui.update_ui()
-				end)
+			return async.sync(function()
+				local paused = async.wait(music.pause_or_resume())
+				common.update_player_state({ paused = paused })
+				async.wait(ui.update_ui())
 			end)
 		end,
 		NextSong = function()
-			music.next_song()
+			return music.next_song()
 		end,
 		PrevSong = function()
-			music.prev_song()
+			return music.prev_song()
 		end,
 		SkipForward = function()
-			music.forward()
+			return music.forward()
 		end,
 		SkipBack = function()
-			music.rewind()
+			return music.rewind()
 		end,
 		Delete = function(line)
-			music.delete_song(line)
+			return music.delete_song(line)
 		end,
 		Download = function()
-			music.download_song()
+			return music.download_song()
 		end,
 		SwitchMode = function()
-			music.switch_mode(function(mode)
-				vim.schedule(function()
-					local_state.save_mode(mode)
-				end)
+			return async.sync(function()
+				local new_mode = async.wait(music.switch_mode())
 
-				common.update_player_state({ mode = mode })
+				local_state.save_state({ mode = new_mode })
 
-				vim.schedule(function()
-					ui.update_info_buf()
-				end)
+				common.update_player_state({ mode = new_mode })
+
+				ui.update_info_buf()
 			end)
 		end,
 		IncreaseVolume = function()
-			music.increase_volume()
+			return music.increase_volume()
 		end,
 		DecreaseVolume = function()
-			music.decrease_volume()
+			return music.decrease_volume()
+		end,
+		SwitchPlaylist = function()
+			vim.print("switch playlist")
+		end,
+		AddPlaylist = function()
+			return local_state.add_playlist()
 		end,
 	}
 end

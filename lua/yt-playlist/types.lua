@@ -39,8 +39,8 @@
 ---@field mode PlayMode|nil
 ---@field volume integer|nil
 
----@class MpvListenerCallbacks
----@field update_playlist_buf fun(): nil
----@field update_info_buf fun(): nil
----@field update_volume_buf fun(data: PlayerState): nil
----@field update_playlist_and_info_buf fun(): nil
+---@class StateData
+---@field mode? PlayMode
+---@field playlist? string
+
+---@alias Async<T> fun(callback: fun(result: T))

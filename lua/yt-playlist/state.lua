@@ -173,17 +173,17 @@ end
 function M.show_playlist()
 	global_state.state.is_open = true
 
-	create_playlist_win()
-	create_info_win()
-	create_volume_win()
-
-	set_buf_keymap()
+	vim.schedule(function()
+		create_playlist_win()
+		create_info_win()
+		create_volume_win()
+		set_buf_keymap()
+	end)
 end
 
 function M.hide_playlist()
 	timer.stop_position_timer()
 	timer.stop_fs_event_timer()
-	timer.stop_mpv_listener()
 
 	global_state.state.is_open = false
 

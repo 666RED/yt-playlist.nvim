@@ -1,5 +1,10 @@
 local M = {}
 
+-- note: MODULES
+
+---@type AsyncModule
+local async = require("yt-playlist.async")
+
 function M.setup(buf)
 	local actions = require("yt-playlist.command_config").setup()
 
@@ -10,23 +15,36 @@ function M.setup(buf)
 		h = actions.SkipBack,
 		l = actions.SkipForward,
 		d = actions.Download,
-		x = actions.Delete,
 		m = actions.SwitchMode,
+		["-"] = actions.DecreaseVolume,
+		["="] = actions.IncreaseVolume,
+		s = actions.SwitchPlaylist,
+		a = actions.AddPlaylist,
 	}
 
-	vim.api.nvim_buf_set_keymap(buf, "n", "-", "", {
-		callback = actions.DecreaseVolume,
+	vim.api.nvim_buf_set_keymap(buf, "n", "<M-x>", "", {
+		callback = function()
+			async.sync(function()
+				local current_line = vim.api.nvim_get_current_line()
+				async.wait(actions.Delete(current_line))
+			end)()
+		end,
 	})
 
-	vim.api.nvim_buf_set_keymap(buf, "n", "=", "", {
-		callback = actions.IncreaseVolume,
-	})
+	local keymap = nil
 
 	for key, fn in pairs(mappings) do
-		vim.api.nvim_buf_set_keymap(buf, "n", "<M-" .. key .. ">", "", {
+		if key == "-" or key == "=" then
+			keymap = key
+		else
+			keymap = "<M-" .. key .. ">"
+		end
+
+		vim.api.nvim_buf_set_keymap(buf, "n", keymap, "", {
 			callback = function()
-				local current_line = vim.api.nvim_get_current_line()
-				fn(current_line)
+				async.sync(function()
+					async.wait(fn())
+				end)()
 			end,
 		})
 	end

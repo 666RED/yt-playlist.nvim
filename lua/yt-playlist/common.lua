@@ -7,22 +7,24 @@ local M = {}
 ---@type GlobalStateModule
 local global_state = require("yt-playlist.global-state")
 
-function M.update_player_state(info)
-	-- check if no song is in the playlist
-	vim.schedule(function()
-		local current_line = vim.api.nvim_get_current_line()
+---@type UtilModule
+local util = require("yt-playlist.util")
 
-		if current_line == "" then
-			global_state.player_state.title = nil
-			global_state.player_state.position = nil
-			global_state.player_state.duration = nil
-			global_state.player_state.paused = nil
-			return
-		end
-	end)
+function M.update_player_state(info)
+	if not info then
+		global_state.player_state = {
+			title = nil,
+			position = nil,
+			paused = nil,
+			duration = nil,
+			mode = nil,
+			volume = nil,
+		}
+		return
+	end
 
 	if info.title then
-		global_state.player_state.title = info.title
+		global_state.player_state.title = util.remove_extension(info.title)
 	end
 
 	if info.position then
