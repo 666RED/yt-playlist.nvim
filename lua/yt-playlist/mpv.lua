@@ -1,6 +1,8 @@
 ---@class MpvModule
 ---@field ensure_mpv function
 ---@field mpv_cmd fun(cmd: (string|integer|boolean)[]): fun(callback: fun(): any)
+---@field get_playlist fun(): AsyncThunk<table[]>
+---@field clear_playlist fun(): AsyncThunk<nil>
 local M = {}
 
 -- note: MODULES
@@ -8,6 +10,7 @@ local M = {}
 ---@type AsyncModule
 local async = require("yt-playlist.async")
 
+-- note: LOCAL FUNCTIONS
 local function spawn_mpv()
 	os.remove("/tmp/mpv.sock")
 
@@ -55,6 +58,7 @@ local function wait_mpv()
 	end
 end
 
+-- note: EXPORT FUNCTIONS
 function M.mpv_cmd(cmd)
 	return function(callback)
 		vim.system({ "socat", "-", "/tmp/mpv.sock" }, {
@@ -87,6 +91,19 @@ function M.ensure_mpv()
 		spawn_mpv()
 
 		return async.wait(wait_mpv())
+	end)
+end
+
+function M.clear_playlist()
+	return async.sync(function()
+		async.wait(M.mpv_cmd({ "stop" }))
+		-- async.wait(M.mpv_cmd({ "playlist-clear" }))
+	end)
+end
+
+function M.get_playlist()
+	return async.sync(function()
+		return async.wait(M.mpv_cmd({ "get_property", "playlist" }))
 	end)
 end
 

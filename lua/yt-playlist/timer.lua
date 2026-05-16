@@ -1,10 +1,7 @@
 ---@class TimerModule
 ---@field start_fs_event_timer fun(): nil
----@field stop_position_timer fun(): nil
----@field stop_fs_event_timer fun(): nil
 ---@field start_position_timer fun(): nil
 ---@field start_mpv_listener fun(): nil
----@field stop_mpv_listener fun(): nil
 local M = {}
 
 -- note: MODULE
@@ -24,9 +21,29 @@ local async = require("yt-playlist.async")
 ---@type ControllerModule
 local controller = require("yt-playlist.controller")
 
+---@type CommonModule
+local common = require("yt-playlist.common")
+
+---@type StopTimerModule
+local stop_timer = require("yt-playlist.stop_timer")
+
+---@type ConstantsModule
 local constants = require("yt-playlist.constants")
 
+---@type DbModule
+local db = require("yt-playlist.db")
+
+---@type PlaylistModule
+local playlist = require("yt-playlist.playlist")
+
+-- note: LOCAL FUNCTIONS
+local function send(handle, cmd)
+	handle:write(vim.json.encode(cmd) .. "\n")
+end
+
 function M.start_fs_event_timer()
+	stop_timer.stop_fs_event_timer()
+
 	local fs_event = vim.loop.new_fs_event()
 
 	if not fs_event then
@@ -61,10 +78,21 @@ function M.start_fs_event_timer()
 					global_state.timer.fs_event_timer:close()
 					global_state.timer.fs_event_timer = nil
 
+					-- note:
+					-- if addition / remove happened in Music directory
+					-- 1. sync db.json with files
+					-- 2. sync mpv playlist with db.json
+					-- 3. sync playlists.json with files
+					-- 4. update global_state.files
+					-- 5. update ui
 					async.sync(function()
-						async.wait(music.update_files())
-						async.wait(music.sync_playlist())
-						async.wait(ui.get_current_song_and_update_ui())
+						local all_files = controller.get_all_files()
+
+						db.sync_db(all_files)
+						async.wait(controller.sync_playlist())
+						playlist.sync_playlists()
+						async.wait(controller.update_files())
+						async.wait(common.get_current_song_and_update_ui())
 					end)()
 				end)
 			)
@@ -72,29 +100,9 @@ function M.start_fs_event_timer()
 	)
 end
 
-function M.stop_position_timer()
-	if global_state.timer.position_timer then
-		global_state.timer.position_timer:stop()
-		global_state.timer.position_timer:close()
-		global_state.timer.position_timer = nil
-	end
-end
-
-function M.stop_fs_event_timer()
-	if global_state.timer.fs_event_timer then
-		global_state.timer.fs_event_timer:stop()
-		global_state.timer.fs_event_timer:close()
-		global_state.timer.fs_event_timer = nil
-	end
-	if global_state.timer.fs_event then
-		global_state.timer.fs_event:stop()
-		global_state.timer.fs_event = nil
-	end
-end
-
 function M.start_position_timer()
 	if global_state.timer.position_timer then
-		M.stop_position_timer()
+		stop_timer.stop_position_timer()
 	end
 
 	global_state.timer.position_timer = vim.loop.new_timer()
@@ -109,14 +117,100 @@ function M.start_position_timer()
 end
 
 function M.start_mpv_listener()
-	global_state.timer.mpv_listener = controller.start_mpv_listener()
-end
+	stop_timer.stop_mpv_listener()
 
-function M.stop_mpv_listener()
-	if global_state.timer.mpv_listener then
-		global_state.timer.mpv_listener:close()
-		global_state.timer.mpv_listener = nil
+	local handle = vim.loop.new_pipe(false)
+	local playlist_timer = vim.uv.new_timer()
+
+	if not handle then
+		-- todo: may handle this
+		return nil
 	end
+
+	handle:connect("/tmp/mpv.sock", function(err)
+		if err then
+			return
+		end
+
+		-- send observe_property command
+		send(handle, { command = { "observe_property", 1, "playlist-pos" } })
+		send(handle, { command = { "observe_property", 2, "volume" } })
+		send(handle, { command = { "observe_property", 3, "pause" } })
+		send(handle, { command = { "observe_property", 4, "playlist-count" } })
+		-- send(handle, { command = { "observe_property", 4, "time-pos" } })
+
+		-- listen for incoming events
+		handle:read_start(function(read_err, data)
+			if read_err or not data then
+				return
+			end
+
+			-- split events by new line
+			for line in data:gmatch("[^\n]+") do
+				if line ~= "" then
+					local ok, event = pcall(vim.json.decode, line)
+
+					if not ok then
+						return
+					end
+
+					-- note: update volume buf when volume is adjusted
+					if event.event == "property-change" and event.name == "volume" then
+						common.update_player_state({ volume = event.data })
+						ui.update_volume_buf()
+					end
+
+					-- note: update playlist and info when song position is updated
+					if event.event == "property-change" and event.name == "playlist-pos" then
+						if playlist_timer then
+							playlist_timer:stop()
+
+							playlist_timer:start(
+								100,
+								0,
+								vim.schedule_wrap(function()
+									async.sync(function()
+										local info = async.wait(music.get_current_song())
+										common.update_player_state(info)
+
+										ui.update_info_buf()
+										async.wait(ui.update_playlist_buf())
+
+										if global_state.player_state and global_state.player_state.title then
+											vim.schedule(function()
+												vim.notify("Now playing: " .. global_state.player_state.title)
+											end)
+										end
+									end)()
+								end)
+							)
+						end
+					end
+
+					-- note: update info buf when rewind / forward
+					if event.event == "seek" then
+						async.sync(function()
+							local info = async.wait(music.get_current_song())
+							common.update_player_state(info)
+
+							ui.update_info_buf()
+						end)()
+					end
+
+					if event.event == "property-change" and event.name == "playlist-count" then
+						local playlist_count = event.data
+
+						-- no more song in mpv playlist -> update global_state.player_state
+						if playlist_count == 0 then
+							common.reset_player_state()
+						end
+					end
+				end
+			end
+		end)
+	end)
+
+	global_state.timer.mpv_listener = handle
 end
 
 return M

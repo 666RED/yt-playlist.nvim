@@ -1,34 +1,334 @@
 ---@class UiModule
----@field update_info_buf fun(): nil
----@field update_playlist_buf fun(): nil
 ---@field update_ui fun(): AsyncThunk
----@field get_current_song_and_update_ui fun(): AsyncThunk
----@field draw_volume_string fun(): string
+---@field update_playlist_buf fun(): nil
+---@field update_info_buf fun(): nil
 ---@field update_volume_buf fun(): nil
+---@field show_playlist fun(): nil
+---@field hide_playlist fun(): nil
+---@field toggle_ui fun(): nil
+---@field switch_tab fun(): nil
 local M = {}
 
 -- note: MODULES
 
 ---@type GlobalStateModule
 local global_state = require("yt-playlist.global-state")
-
----@type CommonModule
-local common = require("yt-playlist.common")
+local local_state = require("yt-playlist.local_state")
 
 ---@type UtilModule
 local util = require("yt-playlist.util")
 
----@type MusicModule
-local music = require("yt-playlist.music")
-
 ---@type AsyncModule
 local async = require("yt-playlist.async")
 
+---@type StopTimerModule
+local stop_timer = require("yt-playlist.stop_timer")
+
+---@type ConstantsModule
 local constants = require("yt-playlist.constants")
 
 -- note: LOCAL VARIABLES
+local TOTAL_WIDTH = constants.TOTAL_WIDTH
+local UPPER_HEIGHT = constants.UPPER_HEIGHT
+local INFO_WIDTH = constants.INFO_WIDTH
 local LOWER_HEIGHT = constants.LOWER_HEIGHT
 local VOLUME_WIDTH = constants.VOLUME_WIDTH
+
+-- note: LOCAL FUNCTIONS
+local function setup_info_buf()
+	vim.bo[global_state.state.info_buf].modifiable = true
+
+	local CONTENT_LINES = 7
+	local empty_lines = LOWER_HEIGHT - CONTENT_LINES
+
+	local lines = {
+		"  Now Playing :", -- line 0
+		"  Status      :", -- line 1
+		"  Time        :", -- line 2
+		"  Mode        :", -- line 3
+	}
+
+	for _ = 1, empty_lines do
+		table.insert(lines, "")
+	end
+
+	table.insert(
+		lines,
+		"  [Enter] Play  |  [A-p] Play/Pause  |  [A-j] Next  |  [A-k] Prev  |  [A-d] Download  |  [A-t] Switch tab "
+	)
+	table.insert(
+		lines,
+		"  ------------------------------------------------------------------------------------------------------- "
+	)
+	table.insert(lines, "  [A-h] Rewind  |  [A-l] Forward  |  [A-m] Switch Mode  |  [A-x] Remove  |  [q] Quit ")
+
+	-- todo: change here
+	vim.api.nvim_buf_set_lines(global_state.state.info_buf, 0, -1, false, lines)
+	vim.bo[global_state.state.info_buf].modifiable = false
+end
+
+-- quit with q and C-c
+local function set_buf_keymap()
+	vim.api.nvim_buf_set_keymap(global_state.state.playlist_buf, "n", "q", "", {
+		callback = function()
+			M.toggle_ui()
+		end,
+	})
+
+	vim.api.nvim_buf_set_keymap(global_state.state.playlist_buf, "n", "<C-c>", "", {
+		callback = function()
+			M.toggle_ui()
+		end,
+	})
+end
+
+local function create_playlist_win()
+	if not global_state.state.playlist_buf then
+		global_state.state.playlist_buf = vim.api.nvim_create_buf(false, true)
+	end
+
+	global_state.state.playlist_win = vim.api.nvim_open_win(global_state.state.playlist_buf, true, {
+		title = global_state.current_playlist or "Play list",
+		title_pos = "center",
+		relative = "editor",
+		row = 0,
+		col = 0,
+		width = TOTAL_WIDTH,
+		height = UPPER_HEIGHT - 3,
+	})
+
+	util.set_win_opts(global_state.state.playlist_win)
+end
+
+local function create_info_win()
+	if not global_state.state.info_buf then
+		global_state.state.info_buf = vim.api.nvim_create_buf(false, true)
+
+		setup_info_buf()
+
+		vim.bo[global_state.state.info_buf].modifiable = false
+	end
+
+	global_state.state.info_win = vim.api.nvim_open_win(global_state.state.info_buf, false, {
+		style = "minimal",
+		relative = "editor",
+		row = UPPER_HEIGHT - 1,
+		col = 0,
+		width = INFO_WIDTH,
+		height = LOWER_HEIGHT,
+		focusable = false,
+	})
+
+	util.set_win_opts(global_state.state.info_win)
+
+	vim.wo[global_state.state.info_win].cursorline = false -- turn off cursorline
+end
+
+local function create_volume_win()
+	if not global_state.state.volume_buf then
+		global_state.state.volume_buf = vim.api.nvim_create_buf(false, true)
+	end
+
+	global_state.state.volume_win = vim.api.nvim_open_win(global_state.state.volume_buf, false, {
+		style = "minimal",
+		relative = "editor",
+		row = UPPER_HEIGHT - 1,
+		col = INFO_WIDTH + 2,
+		width = VOLUME_WIDTH - 2,
+		height = LOWER_HEIGHT,
+		focusable = false,
+	})
+
+	util.set_win_opts(global_state.state.volume_win)
+end
+
+local function render_songs()
+	vim.schedule(function()
+		local buf = global_state.state.playlist_buf
+
+		if not buf then
+			return
+		end
+
+		local win = vim.fn.bufwinid(buf)
+
+		if win == -1 then
+			return
+		end
+
+		local cursor = vim.api.nvim_win_get_cursor(win)
+
+		vim.api.nvim_buf_clear_namespace(buf, global_state.song_ns, 2, -1)
+
+		local song_files = global_state.files
+
+		local songs = {}
+
+		for _, song in ipairs(song_files) do
+			table.insert(songs, song.filename)
+		end
+
+		vim.bo[buf].modifiable = true
+		vim.api.nvim_buf_set_lines(buf, 2, -1, false, songs)
+
+		local state = local_state.load_state()
+
+		-- highlight current song
+		if state.current_playlist == global_state.current_playlist then
+			for i, song in ipairs(songs) do
+				local is_current = song == global_state.player_state.title
+
+				vim.api.nvim_buf_set_extmark(buf, global_state.song_ns, i + 1, 0, {
+					hl_group = is_current and "Title" or "",
+					end_col = #song,
+				})
+			end
+		end
+
+		vim.bo[buf].modifiable = false
+
+		if vim.api.nvim_win_is_valid(win) then
+			local line_count = vim.api.nvim_buf_line_count(buf)
+			local row = math.min(cursor[1], line_count)
+			vim.api.nvim_win_set_cursor(win, { row, cursor[2] })
+		end
+	end)
+end
+
+local function render_playlists()
+	vim.schedule(function()
+		local buf = global_state.state.playlist_buf
+
+		if not buf then
+			return
+		end
+
+		local win = vim.fn.bufwinid(buf)
+
+		if win == -1 then
+			return
+		end
+
+		local cursor = vim.api.nvim_win_get_cursor(win)
+
+		local playlist_names = {}
+
+		for _, playlist in ipairs(global_state.playlists) do
+			table.insert(playlist_names, playlist)
+		end
+
+		vim.bo[buf].modifiable = true
+		vim.api.nvim_buf_set_lines(buf, 2, 3, false, { "All" })
+		vim.api.nvim_buf_set_lines(buf, 3, -1, false, playlist_names)
+
+		-- highlight current playlist
+		local playlists = {}
+
+		table.insert(playlists, "All")
+
+		for _, playlist in ipairs(global_state.playlists) do
+			table.insert(playlists, playlist)
+		end
+
+		local state = local_state.load_state()
+
+		for i, playlist in ipairs(playlists) do
+			local is_current = playlist == state.current_playlist
+
+			vim.api.nvim_buf_set_extmark(buf, global_state.playlist_ns, i + 1, 0, {
+				hl_group = is_current and "Title" or "",
+				end_col = #playlist,
+			})
+		end
+
+		vim.bo[buf].modifiable = false
+
+		if vim.api.nvim_win_is_valid(win) then
+			local line_count = vim.api.nvim_buf_line_count(buf)
+			local row = math.min(cursor[1], line_count)
+			vim.api.nvim_win_set_cursor(win, { row, cursor[2] })
+		end
+	end)
+end
+
+-- note: EXPORT FUNCTIONS
+
+function M.update_ui()
+	return async.sync(function()
+		async.wait(M.update_playlist_buf())
+
+		M.update_info_buf()
+
+		M.update_volume_buf()
+	end)
+end
+
+function M.update_playlist_buf()
+	return async.sync(function()
+		vim.schedule(function()
+			local buf = global_state.state.playlist_buf
+			local line_count = buf and vim.api.nvim_buf_line_count(buf)
+
+			if not global_state.state.playlist_buf then
+				global_state.state.playlist_buf = vim.api.nvim_create_buf(false, true)
+			end
+
+			-- initialize playlist buf
+			if line_count <= 1 then
+				-- Create tabs
+				local line = ""
+				local tab_positions = {}
+				for _, tab in ipairs(global_state.tabs) do
+					local label = tab .. "  "
+					table.insert(tab_positions, { start = #line, len = #label, name = tab })
+					line = line .. label .. " "
+				end
+
+				vim.api.nvim_buf_set_lines(global_state.state.playlist_buf, 0, 1, false, { line })
+
+				vim.api.nvim_buf_set_lines(
+					global_state.state.playlist_buf,
+					1,
+					2,
+					false,
+					{ string.rep("─", constants.TOTAL_WIDTH) }
+				)
+			end
+
+			-- update tab
+			vim.api.nvim_buf_clear_namespace(global_state.state.playlist_buf, global_state.playlist_tabs_ns, 0, 1)
+
+			local line = ""
+			local tab_positions = {}
+			for _, tab in ipairs(global_state.tabs) do
+				local label = tab .. "  "
+				table.insert(tab_positions, { start = #line, len = #label, name = tab })
+				line = line .. label .. " "
+			end
+
+			-- highlight tab
+			for _, pos in ipairs(tab_positions) do
+				local hl = pos.name == global_state.current_tab and "Title" or "Comment"
+				vim.api.nvim_buf_set_extmark(
+					global_state.state.playlist_buf,
+					global_state.playlist_tabs_ns,
+					0,
+					pos.start,
+					{
+						end_col = pos.start + pos.len,
+						hl_group = hl,
+					}
+				)
+			end
+		end)
+
+		if global_state.current_tab == "Songs" then
+			render_songs()
+		else
+			render_playlists()
+		end
+	end)
+end
 
 function M.update_info_buf()
 	local buf = global_state.state.info_buf
@@ -82,61 +382,6 @@ function M.update_info_buf()
 			virt_text = { { mode_icons[mode or "normal"], "Normal" } },
 			virt_text_pos = "eol",
 		})
-	end)
-end
-
-function M.update_playlist_buf()
-	return async.sync(function()
-		async.wait(music.update_files())
-
-		vim.schedule(function()
-			local buf = global_state.state.playlist_buf
-
-			if not buf then
-				return
-			end
-
-			local win = vim.fn.bufwinid(buf)
-
-			-- do not need to update ui
-			if win == -1 then
-				return
-			end
-
-			local cursor = vim.api.nvim_win_get_cursor(win)
-
-			vim.api.nvim_buf_clear_namespace(buf, global_state.playlist_ns, 0, -1)
-
-			-- note: update file in music
-			local song_files = music.get_files()
-
-			local songs = {}
-
-			for _, song in ipairs(song_files) do
-				table.insert(songs, song.filename)
-			end
-
-			vim.bo[buf].modifiable = true
-			vim.api.nvim_buf_set_lines(buf, 0, -1, false, songs)
-
-			-- highlight current song
-			for i, song in ipairs(songs) do
-				local is_current = song == global_state.player_state.title
-
-				vim.api.nvim_buf_set_extmark(buf, global_state.playlist_ns, i - 1, 0, {
-					hl_group = is_current and "Title" or "",
-					end_col = #song,
-				})
-			end
-
-			vim.bo[buf].modifiable = false
-
-			if vim.api.nvim_win_is_valid(win) then
-				local line_count = vim.api.nvim_buf_line_count(buf)
-				local row = math.min(cursor[1], line_count)
-				vim.api.nvim_win_set_cursor(win, { row, cursor[2] })
-			end
-		end)
 	end)
 end
 
@@ -206,32 +451,51 @@ function M.update_volume_buf()
 	end)
 end
 
-function M.update_ui()
+function M.show_playlist()
+	global_state.state.is_open = true
+
+	vim.schedule(function()
+		create_playlist_win()
+		create_info_win()
+		create_volume_win()
+		set_buf_keymap()
+	end)
+end
+
+function M.hide_playlist()
+	stop_timer.stop_position_timer()
+	-- stop_timer.stop_fs_event_timer() -- todo: may remove
+
+	global_state.state.is_open = false
+
+	vim.api.nvim_win_hide(global_state.state.playlist_win)
+	vim.api.nvim_win_hide(global_state.state.info_win)
+	vim.api.nvim_win_hide(global_state.state.volume_win)
+
+	global_state.state.playlist_win = nil
+	global_state.state.info_win = nil
+	global_state.state.volume_win = nil
+end
+
+function M.toggle_ui()
+	-- hide
+	if global_state.state.is_open then
+		M.hide_playlist()
+	else
+		M.show_playlist()
+	end
+end
+
+function M.switch_tab()
 	return async.sync(function()
+		if global_state.current_tab == "Songs" then
+			global_state.current_tab = "Playlists"
+		else
+			global_state.current_tab = "Songs"
+		end
+
 		async.wait(M.update_playlist_buf())
-
-		M.update_info_buf()
-
-		M.update_volume_buf()
 	end)
-end
-
-function M.get_current_song_and_update_ui()
-	return async.sync(function()
-		local info = async.wait(music.get_current_song())
-
-		common.update_player_state(info)
-
-		async.wait(M.update_ui())
-
-		vim.schedule(function()
-			vim.bo[global_state.state.info_buf].modifiable = false
-		end)
-	end)
-end
-
-function M.draw_volume_string()
-	return string.rep("=", 10)
 end
 
 return M

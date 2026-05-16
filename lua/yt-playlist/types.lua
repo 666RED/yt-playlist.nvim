@@ -1,11 +1,10 @@
----@class Song_File
----@field full_name string
+---@class Db_Song
+---@field path string
+---@field fullname string
 ---@field filename string
 ---@field extension string
----@field mpv_id integer | nil
-
----@class Song_File_With_Index: Song_File
----@field index integer
+---@field id? string
+---@field index? integer
 
 ---@class Song_Opts
 ---@field format string
@@ -41,6 +40,17 @@
 
 ---@class StateData
 ---@field mode? PlayMode
----@field playlist? string
+---@field current_playlist? string
 
 ---@alias Async<T> fun(callback: fun(result: T))
+---@alias Tab "Songs" | "Playlists"
+
+---@class Playlist_Song
+---@field id integer
+
+---@class Playlist
+---@field name string
+---@field songs Playlist_Song[]
+
+---@class Db_Playlist
+---@field playlist table<string, Playlist[]>

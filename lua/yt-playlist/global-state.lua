@@ -2,7 +2,14 @@
 ---@field state YtPlaylistState
 ---@field timer YtPlaylistTimer
 ---@field info_ns integer
+---@field song_ns integer
 ---@field playlist_ns integer
+---@field playlist_tabs_ns integer
+---@field tabs Tab[]
+---@field current_tab Tab
+---@field files Db_Song[]
+---@field playlists string[]
+---@field current_playlist string
 local M = {}
 
 -- note: VARIABLES
@@ -30,6 +37,16 @@ M.player_state = {
 }
 
 M.info_ns = vim.api.nvim_create_namespace("yt_info")
-M.playlist_ns = vim.api.nvim_create_namespace("yt_playlist")
+M.song_ns = vim.api.nvim_create_namespace("yt_songs")
+M.playlist_ns = vim.api.nvim_create_namespace("yt_playlists")
+M.playlist_tabs_ns = vim.api.nvim_create_namespace("yt_playlist_tabs")
+
+M.tabs = { "Songs", "Playlists" }
+
+M.current_tab = M.tabs[1]
+
+M.files = {}
+M.playlists = {}
+M.current_playlist = ""
 
 return M
