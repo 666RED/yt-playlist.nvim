@@ -1,4 +1,4 @@
----@class Db_Song
+---@class DbSong
 ---@field path string
 ---@field fullname string
 ---@field filename string
@@ -6,7 +6,7 @@
 ---@field id? string
 ---@field index? integer
 
----@class Song_Opts
+---@class SongOpts
 ---@field format string
 ---@field quality string
 ---@field name string
@@ -45,12 +45,16 @@
 ---@alias Async<T> fun(callback: fun(result: T))
 ---@alias Tab "Songs" | "Playlists"
 
----@class Playlist_Song
+---@class PlaylistSong
 ---@field id integer
 
 ---@class Playlist
 ---@field name string
----@field songs Playlist_Song[]
+---@field songs PlaylistSong[]
 
----@class Db_Playlist
+---@class DbPlaylist
 ---@field playlist table<string, Playlist[]>
+
+---@class LineMetadata
+---@field name string
+---@field display_name string

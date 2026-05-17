@@ -63,9 +63,9 @@ local function remove_song(line)
 			-- if deleted song is in current playlist
 			local current_songs = global_state.files
 
-			for _, song in ipairs(current_songs) do
-				if song.filename == line then
-					async.wait(music.delete_song_from_mpv(song)) -- 2. remove song from mpv (if it is playing in mpv playlist)
+			for _, s in ipairs(current_songs) do
+				if s.filename == line then
+					async.wait(music.delete_song_from_mpv(s)) -- 2. remove song from mpv (if it is playing in mpv playlist)
 					break
 				end
 			end
@@ -100,13 +100,12 @@ local function remove_song(line)
 				async.wait(music.delete_song_from_mpv(song)) -- 2. remove song from mpv (if it is playing in mpv playlist)
 			end
 
-			vim.defer_fn(function()
-				async.sync(function()
-					async.wait(controller.update_files()) -- 3. update global_state.files
+			async.sync(function()
+				async.wait(controller.update_files()) -- 3. update global_state.files
+				playlist.set_playlists()
 
-					async.wait(common.get_current_song_and_update_ui()) -- 4. update ui
-				end)()
-			end, 10)
+				async.wait(common.get_current_song_and_update_ui()) -- 4. update ui
+			end)()
 
 			vim.schedule(function()
 				vim.notify(line .. " removed from playlist") -- 5. display success message
@@ -115,9 +114,9 @@ local function remove_song(line)
 	end
 end
 
----@param line string
+---@param name string
 ---@return AsyncThunk<nil>
-local function remove_playlist(line)
+local function remove_playlist(name)
 	return async.sync(function()
 		-- note:
 		-- 1. conformation prompt
@@ -130,19 +129,19 @@ local function remove_playlist(line)
 
 		local select = async.wrap(vim.ui.select)
 
-		local result = async.wait(select({ "No", "Yes" }, { prompt = "Remove playlist (" .. line .. ")?" }))
+		local result = async.wait(select({ "No", "Yes" }, { prompt = "Remove playlist (" .. name .. ")?" }))
 
 		if not result or result == "No" then
 			vim.notify("Cancelled")
 			return
 		end
 
-		playlist.remove_playlist(line)
+		playlist.remove_playlist(name)
 
 		playlist.set_playlists() -- udpate global_state.playlists
 
 		-- if deleted playlist is global_state.curernt_playlist
-		if global_state.current_playlist == line then
+		if global_state.current_playlist == name then
 			local local_current_playlist = local_state.load_state().current_playlist
 
 			-- if mpv playlist == local current playlist -> clear mpv playlist
@@ -158,7 +157,7 @@ local function remove_playlist(line)
 		async.wait(ui.update_ui())
 
 		vim.schedule(function()
-			vim.notify("Removed " .. line)
+			vim.notify("Removed " .. name)
 		end)
 	end)
 end
@@ -223,22 +222,21 @@ function M.setup()
 		SkipBack = function()
 			return music.rewind()
 		end,
-		Delete = function(line)
+		DeletePlaylist = function(name)
 			return async.sync(function()
-				if global_state.current_tab == "Songs" then
-					async.wait(remove_song(line))
-				else
-					if line == "All" then
-						vim.notify("All playlist cannot be removed", vim.log.levels.WARN)
-						return
-					end
-
-					async.wait(remove_playlist(line))
+				if name == "All" then
+					vim.notify("All playlist cannot be removed", vim.log.levels.WARN)
+					return
 				end
+
+				async.wait(remove_playlist(name))
 			end)
 		end,
+		DeleteSong = function(line)
+			return remove_song(line)
+		end,
 		Download = function()
-			return music.download_song()
+			return controller.download_song()
 		end,
 		SwitchMode = function()
 			return async.sync(function()
@@ -276,7 +274,7 @@ function M.setup()
 						if not name or name == "" then
 							vim.notify("Cancelled")
 							return
-						elseif playlist.is_repeated_name(name) then
+						elseif playlist.is_repeated_name(vim.trim(name)) then
 							vim.notify('Playlist "' .. name .. '" existed', vim.log.levels.WARN)
 						else
 							playlist_name = name
@@ -288,15 +286,13 @@ function M.setup()
 
 					vim.notify("Created playlist: " .. playlist_name)
 
-					vim.defer_fn(function()
-						playlist.set_playlists()
-						ui.update_playlist_buf()()
-					end, 10)
+					playlist.set_playlists()
+					ui.update_playlist_buf()()
 				end)
 			else -- add new song (skip for "All")
 				if current_playlist == "All" then
 					vim.schedule(function()
-						vim.notify("You may download song from YT or manually add songs to ~/Music/YtPlayList folder")
+						vim.notify("Use [A-d] to download song instead", vim.log.levels.WARN)
 					end)
 					return -- todo: handle here
 				else
@@ -352,25 +348,7 @@ function M.setup()
 								return
 							end
 
-							playlist.add_song(global_state.current_playlist, item.id)
-
-							local current_playlist = local_state.load_state().current_playlist
-
-							-- add song to mpv playlist if it is current playlist
-							if current_playlist == global_state.current_playlist then
-								async.sync(function()
-									local new_file = async.wait(controller.insert_new_song_to_mpv(global_state.files))
-
-									if current_playlist == "All" then
-										db.insert_song(new_file)
-									end
-								end)()
-							end
-
-							vim.defer_fn(function()
-								global_state.files = playlist.get_playlist_songs(global_state.current_playlist)
-								ui.update_playlist_buf()()
-							end, 10)
+							async.wait(common.add_song_to_playlist(item.id))
 
 							picker:close()
 							vim.schedule(function()

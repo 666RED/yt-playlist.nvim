@@ -73,7 +73,9 @@ function M.setup()
 				else
 					-- Playlists
 					async.sync(function()
-						local current_playlist = vim.api.nvim_get_current_line()
+						local line_nr = vim.api.nvim_win_get_cursor(0)[1]
+						local metadata = global_state.line_metadata[line_nr - 2] -- subtract header lines
+						local current_playlist = metadata.name
 
 						local songs = {}
 
@@ -123,11 +125,19 @@ function M.setup()
 
 		vim.api.nvim_buf_set_keymap(buf, "n", "<M-x>", "", {
 			callback = function()
-				async.sync(function()
-					local current_line = vim.api.nvim_get_current_line()
+				if global_state.current_tab == "Songs" then
+					async.sync(function()
+						local line = vim.api.nvim_get_current_line()
+						async.wait(actions.DeleteSong(line))
+					end)()
+				else
+					async.sync(function()
+						local line_nr = vim.api.nvim_win_get_cursor(0)[1]
+						local metadata = global_state.line_metadata[line_nr - 2] -- subtract header lines
 
-					async.wait(actions.Delete(current_line))
-				end)()
+						async.wait(actions.DeletePlaylist(metadata.name))
+					end)()
+				end
 			end,
 		})
 

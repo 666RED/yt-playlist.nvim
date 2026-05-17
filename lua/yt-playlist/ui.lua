@@ -27,6 +27,9 @@ local stop_timer = require("yt-playlist.stop_timer")
 ---@type ConstantsModule
 local constants = require("yt-playlist.constants")
 
+---@type DbModule
+local db = require("yt-playlist.db")
+
 -- note: LOCAL VARIABLES
 local TOTAL_WIDTH = constants.TOTAL_WIDTH
 local UPPER_HEIGHT = constants.UPPER_HEIGHT
@@ -174,7 +177,7 @@ local function render_songs()
 		local state = local_state.load_state()
 
 		-- highlight current song
-		if state.current_playlist == global_state.current_playlist then
+		if state and state.current_playlist == global_state.current_playlist then
 			for i, song in ipairs(songs) do
 				local is_current = song == global_state.player_state.title
 
@@ -211,33 +214,43 @@ local function render_playlists()
 
 		local cursor = vim.api.nvim_win_get_cursor(win)
 
-		local playlist_names = {}
+		---@type string[]
+		local playlist_lines = {}
 
-		for _, playlist in ipairs(global_state.playlists) do
-			table.insert(playlist_names, playlist)
+		global_state.line_metadata = {}
+
+		local all_songs = db.load_songs()
+
+		local all_songs_text = #all_songs > 1 and " songs" or " song"
+		local all_line = "All (" .. #all_songs .. all_songs_text .. ")"
+
+		global_state.line_metadata[1] = { name = "All", display_name = all_line }
+
+		for i, playlist in ipairs(global_state.playlists) do
+			local number_of_songs = #playlist.songs
+			local song_text = number_of_songs > 1 and " songs" or " song"
+			local line = playlist.name .. " (" .. number_of_songs .. song_text .. ")"
+
+			table.insert(playlist_lines, line)
+
+			-- setting line metadata
+			global_state.line_metadata[i + 1] = { name = playlist.name, display_name = line }
 		end
 
 		vim.bo[buf].modifiable = true
-		vim.api.nvim_buf_set_lines(buf, 2, 3, false, { "All" })
-		vim.api.nvim_buf_set_lines(buf, 3, -1, false, playlist_names)
+		vim.api.nvim_buf_set_lines(buf, 2, 3, false, { all_line })
+		vim.api.nvim_buf_set_lines(buf, 3, -1, false, playlist_lines)
 
 		-- highlight current playlist
-		local playlists = {}
-
-		table.insert(playlists, "All")
-
-		for _, playlist in ipairs(global_state.playlists) do
-			table.insert(playlists, playlist)
-		end
-
 		local state = local_state.load_state()
+		local playlists = global_state.line_metadata
 
 		for i, playlist in ipairs(playlists) do
-			local is_current = playlist == state.current_playlist
+			local is_current = state and playlist.name == state.current_playlist
 
 			vim.api.nvim_buf_set_extmark(buf, global_state.playlist_ns, i + 1, 0, {
 				hl_group = is_current and "Title" or "",
-				end_col = #playlist,
+				end_col = #playlist.display_name,
 			})
 		end
 
@@ -490,8 +503,16 @@ function M.switch_tab()
 	return async.sync(function()
 		if global_state.current_tab == "Songs" then
 			global_state.current_tab = "Playlists"
+
+			vim.api.nvim_win_set_config(global_state.state.playlist_win, {
+				title = "Choose a playlist",
+			})
 		else
 			global_state.current_tab = "Songs"
+
+			vim.api.nvim_win_set_config(global_state.state.playlist_win, {
+				title = global_state.current_playlist,
+			})
 		end
 
 		async.wait(M.update_playlist_buf())

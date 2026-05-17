@@ -1,7 +1,8 @@
 ---@class CommonModule
 ---@field update_player_state fun(data: PlayerState): nil
----@field get_current_song_and_update_ui fun(): AsyncThunk
+---@field get_current_song_and_update_ui fun(): AsyncThunk<nil>
 ---@field reset_player_state fun(): nil
+---@field add_song_to_playlist fun(song_id: string): AsyncThunk<nil>
 local M = {}
 
 -- note: MODULE
@@ -15,12 +16,10 @@ local util = require("yt-playlist.util")
 ---@type AsyncModule
 local async = require("yt-playlist.async")
 
----@type MusicModule
-local music = require("yt-playlist.music")
+---@type LocalStateModule
+local local_state = require("yt-playlist.local_state")
 
----@type UiModule
-local ui = require("yt-playlist.ui")
-
+-- note: EXPORT FUNCTIONS
 function M.update_player_state(info)
 	for key, value in pairs(info) do
 		if not key then
@@ -36,6 +35,9 @@ function M.update_player_state(info)
 end
 
 function M.get_current_song_and_update_ui()
+	local music = require("yt-playlist.music")
+	local ui = require("yt-playlist.ui")
+
 	return async.sync(function()
 		local info = async.wait(music.get_current_song())
 
@@ -58,6 +60,27 @@ function M.reset_player_state()
 		title = nil,
 		volume = nil,
 	}
+end
+
+function M.add_song_to_playlist(song_id)
+	local playlist = require("yt-playlist.playlist")
+	local controller = require("yt-playlist.controller")
+	local ui = require("yt-playlist.ui")
+
+	return async.sync(function()
+		playlist.add_song(global_state.current_playlist, song_id)
+
+		local local_current_playlist = local_state.load_state().current_playlist
+
+		-- add song to mpv playlist if it is current playlist
+		if local_current_playlist == global_state.current_playlist then
+			async.wait(controller.insert_new_song_to_mpv(global_state.files))
+		end
+
+		global_state.files = playlist.get_playlist_songs(global_state.current_playlist)
+		playlist.set_playlists()
+		async.wait(ui.update_playlist_buf())
+	end)
 end
 
 return M

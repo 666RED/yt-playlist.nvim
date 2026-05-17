@@ -7,8 +7,8 @@
 ---@field remove_song_from_playlist fun(playlist_name: string, song_id: string): nil
 ---@field remove_song_in_all_playlists fun(id: string): nil
 ---@field sync_playlists fun(): nil
----@field get_playlist_songs fun(playlist_name: string): Db_Song[]
----@field get_not_added_playlist_songs fun(playlist_name: string): Db_Song[]
+---@field get_playlist_songs fun(playlist_name: string): DbSong[]
+---@field get_not_added_playlist_songs fun(playlist_name: string): DbSong[]
 ---@field remove_playlist fun(playlist_name: string): nil
 local M = {}
 
@@ -40,7 +40,9 @@ local PLAYLIST_FILE = constants.PLAYLISTS_FILE
 local function set_current_playlist()
 	local state = local_state.load_state()
 
-	global_state.current_playlist = state.current_playlist
+	if state then
+		global_state.current_playlist = state.current_playlist
+	end
 end
 
 ---@param playlists Playlist[]
@@ -95,16 +97,7 @@ function M.load_playlists()
 end
 
 function M.set_playlists()
-	global_state.playlists = {}
-
-	local playlists = M.load_playlists()
-	local playlist_names = {}
-
-	for _, playlist in ipairs(playlists) do
-		table.insert(playlist_names, playlist.name)
-	end
-
-	global_state.playlists = playlist_names
+	global_state.playlists = M.load_playlists()
 end
 
 function M.create_playlist(playlist_name)
@@ -135,7 +128,9 @@ function M.add_song(playlist_name, song_id)
 
 	save_playlists(playlists)
 
-	vim.notify("Song added to playlist")
+	vim.schedule(function()
+		vim.notify("Song added to playlist")
+	end)
 end
 
 function M.remove_song_from_playlist(playlist_name, song_id)

@@ -1,11 +1,12 @@
 ---@class DbModule
----@field load_songs fun(): Db_Song[]
----@field insert_song fun(song: Db_Song): nil
----@field insert_songs fun(songs: Db_Song[]): nil
----@field update_song fun(song: Db_Song): nil
----@field get_song fun(id: integer): Db_Song|nil
+---@field load_songs fun(): DbSong[]
+---@field insert_song fun(song: DbSong): nil
+---@field insert_songs fun(songs: DbSong[]): nil
+---@field update_song fun(song: DbSong): nil
+---@field get_song_by_id fun(id: integer): DbSong|nil
+---@field get_song_by_filename fun(filename: string): DbSong|nil
 ---@field delete_song fun(id: string): nil
----@field sync_db fun(songs: Db_Song[]): nil
+---@field sync_db fun(songs: DbSong[]): nil
 ---@field setup fun(): AsyncThunk<nil>
 local M = {}
 
@@ -25,7 +26,7 @@ local DB_FILE = constants.DB_FILE
 
 -- note: LOCAL FUNCTIONS
 
----@param songs Db_Song[]
+---@param songs DbSong[]
 ---@return nil
 local function save_songs(songs)
 	local f = io.open(DB_FILE, "w")
@@ -98,7 +99,7 @@ function M.update_song(song)
 	end
 end
 
-function M.get_song(id)
+function M.get_song_by_id(id)
 	local songs = M.load_songs()
 
 	for _, song in ipairs(songs) do
@@ -106,6 +107,19 @@ function M.get_song(id)
 			return song
 		end
 	end
+
+	return nil
+end
+
+function M.get_song_by_filename(filename)
+	local songs = M.load_songs()
+
+	for _, song in ipairs(songs) do
+		if song.filename == filename then
+			return song
+		end
+	end
+
 	return nil
 end
 
@@ -126,7 +140,7 @@ function M.sync_db(songs)
 	local db_songs = M.load_songs()
 
 	-- build lookup tables
-	---@type table<string, Db_Song>
+	---@type table<string, DbSong>
 	local db_songs_norm = {}
 
 	for _, song in ipairs(db_songs) do

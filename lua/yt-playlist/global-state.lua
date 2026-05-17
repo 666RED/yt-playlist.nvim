@@ -7,9 +7,10 @@
 ---@field playlist_tabs_ns integer
 ---@field tabs Tab[]
 ---@field current_tab Tab
----@field files Db_Song[]
----@field playlists string[]
+---@field files DbSong[]
+---@field playlists Playlist[]
 ---@field current_playlist string
+---@field line_metadata table<integer, LineMetadata>
 local M = {}
 
 -- note: VARIABLES
@@ -48,5 +49,7 @@ M.current_tab = M.tabs[1]
 M.files = {}
 M.playlists = {}
 M.current_playlist = ""
+
+M.line_metadata = {}
 
 return M
