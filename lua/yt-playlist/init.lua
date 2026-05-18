@@ -28,12 +28,18 @@ local playlist = require("yt-playlist.playlist")
 ---@type DbModule
 local db = require("yt-playlist.db")
 
+---@type CommonModule
+local common = require("yt-playlist.common")
+
 local function setup_global_state()
 	return async.sync(function()
 		async.wait(db.setup())
 		async.wait(local_state.setup())
 		async.wait(music.setup())
 		async.wait(playlist.setup())
+
+		async.wait(common.sync_files_with_all())
+
 		async.wait(controller.update_files())
 	end)
 end

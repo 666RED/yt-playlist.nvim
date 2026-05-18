@@ -86,11 +86,7 @@ function M.start_fs_event_timer()
 					-- 4. update global_state.files
 					-- 5. update ui
 					async.sync(function()
-						local all_files = controller.get_all_files()
-
-						db.sync_db(all_files)
-						async.wait(controller.sync_playlist())
-						playlist.sync_playlists()
+						async.wait(common.sync_files_with_all())
 						async.wait(controller.update_files())
 						async.wait(common.get_current_song_and_update_ui())
 					end)()

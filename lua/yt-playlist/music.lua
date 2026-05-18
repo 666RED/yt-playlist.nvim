@@ -115,7 +115,7 @@ function M.play_song(file)
 		local mpv_playlist = async.wait(mpv.get_playlist()) or {}
 
 		if #mpv_playlist == 0 then
-			async.wait(controller.sync_playlist())
+			async.wait(controller.sync_mpv_playlist())
 
 			async.wait(play_current_song(song.path))
 			return
@@ -131,7 +131,7 @@ function M.play_song(file)
 		end
 
 		if not mpv_index then
-			async.wait(controller.sync_playlist())
+			async.wait(controller.sync_mpv_playlist())
 			async.wait(play_current_song(song.path))
 			return
 		end

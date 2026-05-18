@@ -2,10 +2,11 @@
 ---@field get_all_files fun(): DbSong[]
 ---@field update_files fun(): AsyncThunk<nil>
 ---@field sync_local_playlists fun(): AsyncThunk<nil>
----@field sync_playlist fun(): AsyncThunk<nil>
+---@field sync_mpv_playlist fun(): AsyncThunk<nil>
 ---@field insert_new_song_to_mpv fun(original_files: DbSong[]): AsyncThunk<nil>
 ---@field download_song fun(): nil
 ---@field get_new_song fun(original_files: DbSong[]): DbSong|nil
+---@field sync_file_with_db_and_mpv fun(): AsyncThunk<nil>
 local M = {}
 
 -- note: MODULES
@@ -139,7 +140,7 @@ function M.sync_local_playlists()
 	-- todo: may add here
 end
 
-function M.sync_playlist()
+function M.sync_mpv_playlist()
 	return async.sync(function()
 		local is_random = global_state.player_state.mode == "random"
 
@@ -171,11 +172,19 @@ function M.sync_playlist()
 				files_norm[song.path] = true
 			end
 
-			for i, song in ipairs(mpv_playlist) do
+			for i = #mpv_playlist, 1, -1 do
+				local song = mpv_playlist[i]
+
 				if not files_norm[song.filename] then
 					async.wait(mpv.mpv_cmd({ "playlist-remove", i - 1 })) -- 0-based
 				end
 			end
+
+			-- for i, song in ipairs(mpv_playlist) do
+			-- 	if not files_norm[song.filename] then
+			-- 		async.wait(mpv.mpv_cmd({ "playlist-remove", i - 1 })) -- 0-based
+			-- 	end
+			-- end
 		else -- addition
 			local mpv_playlist_norm = {}
 
@@ -300,7 +309,7 @@ function M.download_song()
 
 		local stderr_lines = {}
 
-		local jobstart = function(cmd, opts)
+		local jobstart = function(_, opts)
 			return function(step)
 				opts = opts or {}
 				opts.detach = true
@@ -393,5 +402,25 @@ function M.get_new_song(original_files)
 
 	return nil
 end
+
+-- function M.sync_file_with_db_and_mpv()
+-- 	return async.sync(function()
+-- 		local files = M.get_all_files()
+-- 		local db_songs = db.load_songs()
+--
+-- 		local files_norm = {}
+-- 		local db_songs_norm = {}
+--
+-- 		for _, file in ipairs(files) do
+-- 			files_norm[file.filename] = true
+-- 		end
+--
+-- 		for _, song in ipairs(db_songs) do
+-- 			db_songs_norm[song.filename] = true
+-- 		end
+--
+--
+-- 	end)
+-- end
 
 return M

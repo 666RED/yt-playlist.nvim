@@ -3,6 +3,7 @@
 ---@field get_current_song_and_update_ui fun(): AsyncThunk<nil>
 ---@field reset_player_state fun(): nil
 ---@field add_song_to_playlist fun(song_id: string): AsyncThunk<nil>
+---@field sync_files_with_all fun(): AsyncThunk<nil>
 local M = {}
 
 -- note: MODULE
@@ -80,6 +81,21 @@ function M.add_song_to_playlist(song_id)
 		global_state.files = playlist.get_playlist_songs(global_state.current_playlist)
 		playlist.set_playlists()
 		async.wait(ui.update_playlist_buf())
+	end)
+end
+
+function M.sync_files_with_all()
+	local controller = require("yt-playlist.controller")
+	local db = require("yt-playlist.db")
+	local playlist = require("yt-playlist.playlist")
+
+	return async.sync(function()
+		local all_files = controller.get_all_files()
+
+		db.sync_db(all_files)
+		async.wait(controller.sync_mpv_playlist())
+		playlist.sync_playlists()
+		playlist.set_playlists()
 	end)
 end
 

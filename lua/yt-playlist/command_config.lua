@@ -348,7 +348,7 @@ function M.setup()
 								return
 							end
 
-							async.wait(common.add_song_to_playlist(item.id))
+							async.sync(common.add_song_to_playlist(item.id))()
 
 							picker:close()
 							vim.schedule(function()

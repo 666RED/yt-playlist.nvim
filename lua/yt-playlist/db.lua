@@ -6,7 +6,7 @@
 ---@field get_song_by_id fun(id: integer): DbSong|nil
 ---@field get_song_by_filename fun(filename: string): DbSong|nil
 ---@field delete_song fun(id: string): nil
----@field sync_db fun(songs: DbSong[]): nil
+---@field sync_db fun(files: DbSong[]): nil
 ---@field setup fun(): AsyncThunk<nil>
 local M = {}
 
@@ -37,6 +37,10 @@ local function save_songs(songs)
 
 	f:write(vim.json.encode({ songs = songs }))
 	f:close()
+end
+
+local function clear_db()
+	save_songs({})
 end
 
 -- note: EXPORT FUNCTIONS
@@ -136,7 +140,12 @@ function M.delete_song(id)
 	save_songs(songs)
 end
 
-function M.sync_db(songs)
+function M.sync_db(files)
+	if #files == 0 then
+		clear_db()
+		return
+	end
+
 	local db_songs = M.load_songs()
 
 	-- build lookup tables
@@ -144,14 +153,14 @@ function M.sync_db(songs)
 	local db_songs_norm = {}
 
 	for _, song in ipairs(db_songs) do
-		db_songs_norm[song.path] = song -- key by path, not id (new files have no id)
+		db_songs_norm[song.path] = song
 	end
 
 	---@type table<string, boolean>
 	local fs_songs_norm = {}
 
-	for _, song in ipairs(songs) do
-		fs_songs_norm[song.path] = true
+	for _, file in ipairs(files) do
+		fs_songs_norm[file.path] = true
 	end
 
 	-- deletion: in db but not on filesystem anymore
@@ -162,9 +171,9 @@ function M.sync_db(songs)
 	end
 
 	-- addition: on filesystem but not in db
-	for _, song in ipairs(songs) do
-		if not db_songs_norm[song.path] then
-			M.insert_song(song)
+	for _, file in ipairs(files) do
+		if not db_songs_norm[file.path] then
+			M.insert_song(file)
 		end
 	end
 end
